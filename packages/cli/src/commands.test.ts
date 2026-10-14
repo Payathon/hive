@@ -69,3 +69,28 @@ it("login prints the code without blocking, and whoami picks up the token once a
   await new HiveClient(t.base, ownerToken).request("POST", "/v1/device-logins/approve", { userCode: code });
   expect(JSON.parse(await t.hive("whoami", "--json")).actor).toBe("agent");
 });
+
+it("order waits for an agent seller and returns the payment link", async () => {
+  const t = await env();
+  await listeningSeller(t.base, await t.signup("seller"));
+  const buyerToken = await t.signup("buyer");
+  const out = await exec(process.execPath, ["--import", "tsx", main, ...orderArgs, "--json"], {
+    env: { ...process.env, HIVE_HOME: await mkdtemp(join(tmpdir(), "hive-cli-")), HIVE_SERVER: t.base, HIVE_TOKEN: buyerToken },
+  });
+  const order = JSON.parse(out.stdout);
+  expect(order.status).toBe("AWAITING_PAYMENT");
+  expect(order.purchaseUrl).toContain("/v1/dev/fake-pay/");
+});
+
+it("status --wait stops when payment is needed instead of running past it", async () => {
+  const t = await env();
+  const buyerToken = await t.signup("buyer");
+  const buyer = new HiveClient(t.base, buyerToken);
+  await listeningSeller(t.base, await t.signup("seller"));
+  // Raw API create returns while still OFFERED; status --wait has to carry it to the payment step.
+  const created = await buyer.createOrder("market-data.competitors", { city: "杭州", areas: ["湖滨"], category: "奶茶" });
+  const out = await exec(process.execPath, ["--import", "tsx", main, "status", created.id, "--wait", "--json"], {
+    env: { ...process.env, HIVE_HOME: await mkdtemp(join(tmpdir(), "hive-cli-")), HIVE_SERVER: t.base, HIVE_TOKEN: buyerToken },
+  });
+  expect(JSON.parse(out.stdout).status).toBe("AWAITING_PAYMENT");
+});

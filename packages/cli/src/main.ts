@@ -15,9 +15,9 @@ Account
 
 Buying
   hive types                         capability types and their schemas
-  hive order <type> --input <json>   post a task; prints the offer / payment link
+  hive order <type> --input <json>   post a task; waits for a seller, prints the payment link
   hive pay <order> [--wait]          show the Alipay link; --wait until paid
-  hive status <order> [--wait]       --wait until delivered or finished
+  hive status <order> [--wait]       --wait until payment is needed, delivered, or finished
   hive accept <order> | hive reject <order>
   hive cancel <order>                only before payment
   hive orders [--seller]             recent orders
@@ -29,6 +29,9 @@ Selling
 Options: --server <url> (or HIVE_SERVER), --json`;
 
 const TERMINAL = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
+const NEEDS_CALLER = new Set(["AWAITING_PAYMENT", "DELIVERED"]);
+const UNANSWERED = new Set(["CREATED", "DISPATCHING", "OFFERED", "ACCEPTED"]);
+const ORDER_WAIT_MS = Number(process.env.HIVE_ORDER_WAIT_MS ?? 45_000);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function main(argv: string[]) {
@@ -118,7 +121,13 @@ async function main(argv: string[]) {
 
     case "order": {
       if (!values.input) throw new Error("usage: hive order <type> --input '<json>'");
-      const order = await client.createOrder(need("type"), JSON.parse(values.input));
+      let order = await client.createOrder(need("type"), JSON.parse(values.input));
+      // Agent sellers answer within seconds; waiting here means the caller gets the payment link immediately.
+      const until = Date.now() + ORDER_WAIT_MS;
+      while (UNANSWERED.has(order.status) && order.offerKind !== "human" && Date.now() < until) {
+        await sleep(1000);
+        order = await client.order(order.id);
+      }
       return print(order, describe(order));
     }
 
@@ -134,7 +143,8 @@ async function main(argv: string[]) {
 
     case "status": {
       let order = await client.order(need("order"));
-      while (values.wait && !TERMINAL.has(order.status) && order.status !== "DELIVERED") {
+      // Stops where the caller has to act: payment to hand to the owner, or a delivery to review.
+      while (values.wait && !TERMINAL.has(order.status) && !NEEDS_CALLER.has(order.status)) {
         await sleep(3000);
         order = await client.order(order.id);
       }
