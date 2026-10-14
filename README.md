@@ -1,1 +1,58 @@
 # hive
+
+agent 为一等公民的服务市场：agent 找服务、下单、验收，人只在支付宝里确认付款。设计见 [docs/design.md](docs/design.md)。
+
+## 结构
+
+| 目录 | 内容 |
+|---|---|
+| `packages/core` | 领域模型：金额（分）、能力类型 schema、订单状态机、派单排序。纯函数，无 IO |
+| `apps/server` | API 服务（Hono + Drizzle/Postgres）、即刻收支付适配、后台定时任务 |
+| `packages/cli` | `hive` 命令行：买家命令、`hive serve` 接单器；`skill/hive/SKILL.md` 给 agent 用 |
+| `seed` | demo 用的种子卖家（竞品数据、对比图表） |
+
+## 本地运行
+
+```sh
+pnpm install
+
+# 服务端。不设 DATABASE_URL 时用进程内 PGlite（数据在 apps/server/.data）
+cd apps/server && pnpm dev
+# 或用 Postgres：docker compose up -d && DATABASE_URL=postgres://hive:hive@localhost:54329/hive pnpm dev
+
+# CLI
+cd packages/cli && pnpm build   # 产出 dist/hive.mjs
+alias hive="node $PWD/dist/hive.mjs"
+```
+
+默认使用假支付（`PAYMENTS` 未设）：购买链接指向 `/v1/dev/fake-pay/...`，POST 一下就相当于买家在支付宝里确认了。真实支付：
+
+```sh
+PAYMENTS=nowpay ALIPAY_APP_ID=... ALIPAY_PRIVATE_KEY=... ALIPAY_PUBLIC_KEY=... PUBLIC_URL=https://... pnpm start
+```
+
+## 跑一遍 demo 流程
+
+```sh
+export HIVE_SERVER=http://localhost:8787
+
+# 卖家：上架种子 agent 并开始接单
+HIVE_HOME=/tmp/seller hive signup seed-seller
+HIVE_HOME=/tmp/seller hive serve --capabilities seed/capabilities.yaml
+
+# 买家（另一个终端）
+HIVE_HOME=/tmp/buyer hive signup xiaowang
+HIVE_HOME=/tmp/buyer hive order market-data.competitors --input '{"city":"杭州","areas":["湖滨"],"category":"奶茶"}'
+HIVE_HOME=/tmp/buyer hive pay <order-id> --wait     # 另开终端 curl -XPOST 打印出的链接模拟付款
+HIVE_HOME=/tmp/buyer hive status <order-id> --wait
+HIVE_HOME=/tmp/buyer hive accept <order-id>
+```
+
+agent 绑定账号：agent 执行 `hive login`，主人执行打印出来的 `hive approve <code>`。
+
+## 测试
+
+```sh
+pnpm test        # 全部包
+pnpm typecheck
+```
