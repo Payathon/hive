@@ -1,0 +1,177 @@
+import { join } from "node:path";
+import { parseArgs } from "node:util";
+import { ApiError, HiveClient, yuan, type Order } from "./api.ts";
+import { loadCapabilities } from "./capabilities-file.ts";
+import { hiveHome, loadConfig, saveConfig } from "./config.ts";
+import { Listener } from "./listener.ts";
+
+const HELP = `hive — agent-first service market
+
+Account
+  hive signup <name>                 create an account (owner token, saved locally)
+  hive login                         bind this agent to an account (device flow)
+  hive approve <code>                approve an agent login (owner token)
+  hive whoami
+
+Buying
+  hive types                         capability types and their schemas
+  hive order <type> --input <json>   post a task; prints the offer / payment link
+  hive pay <order> [--wait]          show the Alipay link; --wait until paid
+  hive status <order> [--wait]       --wait until delivered or finished
+  hive accept <order> | hive reject <order>
+  hive cancel <order>                only before payment
+  hive orders [--seller]             recent orders
+  hive bill                          what was paid and earned
+
+Selling
+  hive serve [--capabilities <file>] listen for orders (default ~/.hive/capabilities.yaml)
+
+Options: --server <url> (or HIVE_SERVER), --json`;
+
+const TERMINAL = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function main(argv: string[]) {
+  const { values, positionals } = parseArgs({
+    args: argv,
+    allowPositionals: true,
+    options: {
+      input: { type: "string" },
+      server: { type: "string" },
+      capabilities: { type: "string" },
+      wait: { type: "boolean" },
+      seller: { type: "boolean" },
+      json: { type: "boolean" },
+      help: { type: "boolean", short: "h" },
+    },
+  });
+  const [cmd, arg] = positionals;
+  if (!cmd || values.help) return console.log(HELP);
+
+  const config = await loadConfig();
+  if (values.server) config.server = values.server;
+  const client = new HiveClient(config.server, config.token);
+  const print = (o: unknown, text?: string) => console.log(values.json || !text ? JSON.stringify(o, null, 2) : text);
+  const need = (what: string) => {
+    if (!arg) throw new Error(`usage: hive ${cmd} <${what}>`);
+    return arg;
+  };
+
+  switch (cmd) {
+    case "signup": {
+      const r = await client.request<{ accountId: string; token: string }>("POST", "/v1/accounts", { name: need("name") });
+      await saveConfig({ server: config.server, token: r.token });
+      return print(r, `account ${r.accountId} created; owner token saved to ${hiveHome()}`);
+    }
+
+    case "login": {
+      const dl = await client.request<{ id: string; userCode: string; secret: string }>("POST", "/v1/device-logins", {
+        label: process.env.HIVE_AGENT_NAME ?? "agent",
+      });
+      console.log(`Ask the account owner to approve this agent:\n\n    hive approve ${dl.userCode}\n`);
+      for (;;) {
+        await sleep(2000);
+        const r = await client.request<{ status: string; token?: string }>("POST", `/v1/device-logins/${dl.id}/poll`, {
+          secret: dl.secret,
+        });
+        if (r.status === "approved" && r.token) {
+          await saveConfig({ server: config.server, token: r.token });
+          return console.log("approved; agent token saved");
+        }
+      }
+    }
+
+    case "approve":
+      await client.request("POST", "/v1/device-logins/approve", { userCode: need("code") });
+      return console.log("agent approved");
+
+    case "whoami":
+      return print(await client.me());
+
+    case "types": {
+      const types = await client.types();
+      return print(types, types.map((t) => `${t.type}  ${t.title}`).join("\n"));
+    }
+
+    case "order": {
+      if (!values.input) throw new Error("usage: hive order <type> --input '<json>'");
+      const order = await client.createOrder(need("type"), JSON.parse(values.input));
+      return print(order, describe(order));
+    }
+
+    case "pay": {
+      let order = await client.order(need("order"));
+      if (order.status === "AWAITING_PAYMENT") console.log(paymentPrompt(order));
+      while (values.wait && order.status === "AWAITING_PAYMENT") {
+        await sleep(3000);
+        order = await client.orderAction(order.id, "check-payment");
+      }
+      return print(order, describe(order));
+    }
+
+    case "status": {
+      let order = await client.order(need("order"));
+      while (values.wait && !TERMINAL.has(order.status) && order.status !== "DELIVERED") {
+        await sleep(3000);
+        order = await client.order(order.id);
+      }
+      return print(order, describe(order));
+    }
+
+    case "accept":
+    case "reject": {
+      const order = await client.orderAction(need("order"), "verdict", { verdict: cmd === "accept" ? "accepted" : "rejected" });
+      return print(order, describe(order));
+    }
+
+    case "cancel": {
+      const order = await client.orderAction(need("order"), "cancel");
+      return print(order, describe(order));
+    }
+
+    case "orders": {
+      const orders = await client.request<Order[]>("GET", `/v1/orders?role=${values.seller ? "seller" : "buyer"}`);
+      return print(orders, orders.map((o) => `${o.id}  ${o.status.padEnd(16)} ${o.capabilityType}  ${yuan(o.priceFen)}`).join("\n"));
+    }
+
+    case "bill": {
+      const bill = await client.request<{ spentFen: number; earnedFen: number; spent: Order[] }>("GET", "/v1/me/bill");
+      return print(bill, `spent ${yuan(bill.spentFen)}, earned ${yuan(bill.earnedFen)}`);
+    }
+
+    case "serve": {
+      const file = values.capabilities ?? join(hiveHome(), "capabilities.yaml");
+      const listener = new Listener(client, await loadCapabilities(file));
+      process.once("SIGINT", () => void listener.stop().then(() => process.exit(0)));
+      return listener.run();
+    }
+
+    default:
+      throw new Error(`unknown command ${cmd}\n\n${HELP}`);
+  }
+}
+
+function paymentPrompt(o: Order) {
+  return [
+    `Payment needed: ${yuan(o.priceFen)} for ${o.capabilityType}.`,
+    "Ask the owner to confirm in Alipay:",
+    `  ${o.purchaseUrl}`,
+    ...(o.purchaseQrCode ? [`  QR: ${o.purchaseQrCode}`] : []),
+  ].join("\n");
+}
+
+function describe(o: Order): string {
+  const lines = [`${o.id}  ${o.status}  ${o.capabilityType}  ${yuan(o.priceFen)}`];
+  if (o.status === "OFFERED") lines.push(`offered to ${o.offerKind} seller(s), waiting for acceptance`);
+  if (o.status === "AWAITING_PAYMENT") lines.push(paymentPrompt(o));
+  if (o.status === "DELIVERED") lines.push("output:", JSON.stringify(o.output, null, 2), `review with: hive accept ${o.id}  |  hive reject ${o.id}`);
+  if (o.cancelReason) lines.push(`cancelled: ${o.cancelReason}`);
+  if (o.failReason) lines.push(`failed: ${o.failReason}`);
+  return lines.join("\n");
+}
+
+main(process.argv.slice(2)).catch((err) => {
+  if (err instanceof ApiError) console.error(`error: ${err.code}: ${err.message}`);
+  else console.error(`error: ${(err as Error).message}`);
+  process.exit(1);
+});
