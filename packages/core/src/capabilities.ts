@@ -21,7 +21,9 @@ export const capabilityTypes = {
           priceLevel: z.number().optional(),
           rating: z.number().optional(),
         }),
-      ),
+      )
+      // An empty list passed the schema in a live run and still consumed the buyer's payment.
+      .min(1),
       source: z.string(),
     }),
     workTimeoutMs: 10 * MINUTE,

@@ -125,6 +125,12 @@ describe("work and delivery", () => {
     expect(o.lastDeliveryError).toBeNull();
   });
 
+  it("does not accept an empty competitor list as a delivery", () => {
+    const o = apply(toPaid(), { type: "work_started" }, { type: "delivery_submitted", output: { stores: [], source: "none" } });
+    expect(o.status).toBe("IN_PROGRESS");
+    expect(o.lastDeliveryError).toContain("stores");
+  });
+
   it("fails a paid order whose seller never starts, and marks it refund-eligible", () => {
     const o = toPaid();
     // market-data.competitors has a 10 minute work timeout, counted from payment.
