@@ -1,35 +1,19 @@
-import type { AddressInfo } from "node:net";
-import { serve, type ServerType } from "@hono/node-server";
 import { afterEach, describe, expect, it } from "vitest";
-import { createApp } from "@hive/server/app";
-import { connectPglite } from "@hive/server/db";
-import { Hive } from "@hive/server/hive";
-import { FakePaymentProvider } from "@hive/server/payments/fake";
 import { HiveClient } from "./api.ts";
 import { Listener } from "./listener.ts";
+import { startTestServer } from "./test-server.ts";
 
 const DATA = "market-data.competitors";
 const input = { city: "杭州", areas: ["湖滨"], category: "奶茶" };
 const good = JSON.stringify({ stores: [{ name: "一点点", area: "湖滨", address: "平海路 1 号" }], source: "seed" });
 
-let server: ServerType | undefined;
-afterEach(() => server?.close());
+let stop: (() => void) | undefined;
+afterEach(() => stop?.());
 
-// A real HTTP server (PGlite + fake payments) so the listener runs exactly as in production.
 async function start() {
-  const payments = new FakePaymentProvider("http://placeholder");
-  const hive = new Hive({ db: await connectPglite(), payments });
-  const app = createApp(hive);
-  server = await new Promise<ServerType>((resolve) => {
-    const s = serve({ fetch: app.fetch, port: 0 }, () => resolve(s));
-  });
-  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const signup = async (name: string) =>
-    (await new HiveClient(base, null).request<{ token: string }>("POST", "/v1/accounts", { name })).token;
-  // Fake purchase URLs point at the placeholder host; rewrite to the test server.
-  const pay = (purchaseUrl: string) =>
-    fetch(purchaseUrl.replace("http://placeholder", base), { method: "POST" }).then((r) => expect(r.status).toBe(200));
-  return { base, signup, pay };
+  const env = await startTestServer();
+  stop = env.stop;
+  return env;
 }
 
 async function sellerWith(run: string) {
