@@ -133,7 +133,8 @@ export function createApp(hive: Hive) {
 
   authed.get("/seller/poll", async (c) => {
     const wait = Math.min(Number(c.req.query("wait") ?? 0) * 1000 || 0, MAX_POLL_MS);
-    return c.json(await hive.pollSeller(me(c), wait));
+    const listener = c.req.query("listener");
+    return c.json(await hive.pollSeller(me(c), wait, listener === undefined ? undefined : listener === "1"));
   });
 
   authed.post("/orders", async (c) => {

@@ -160,6 +160,18 @@ describe("dispatch", () => {
     expect(second.status).toBe("CANCELLED");
   });
 
+  it("counts an owner-token listener as agent presence", async () => {
+    const t = await setup();
+    const owner = await t.account("owner");
+    await t.ok("PUT", `/v1/listings/${DATA}`, owner.token, { acceptMode: "auto", dailyLimit: 10 });
+    await t.ok("POST", `/v1/listings/${DATA}/payment-setup`, owner.token);
+    await t.ok("GET", "/v1/seller/poll", owner.token); // a plain owner poll is human presence
+    const buyer = await t.account("buyer");
+    expect((await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] })).status).toBe("CANCELLED");
+    await t.ok("GET", "/v1/seller/poll?listener=1", owner.token);
+    expect((await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] })).status).toBe("OFFERED");
+  });
+
   it("wakes a waiting long-poll when an offer arrives", async () => {
     const t = await setup();
     const seller = await t.agentSeller("data-agent", DATA);

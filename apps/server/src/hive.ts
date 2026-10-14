@@ -205,8 +205,9 @@ export class Hive {
       .where(eq(accounts.id, p.accountId));
   }
 
-  private async touchPresence(p: Principal) {
-    const set = p.actor === "agent" ? { listenerSeenAt: this.now() } : { humanSeenAt: this.now() };
+  // `hive serve` polls as a listener even with an owner token; other polls default by actor.
+  private async touchPresence(p: Principal, asListener: boolean) {
+    const set = asListener ? { listenerSeenAt: this.now() } : { humanSeenAt: this.now() };
     await this.db.update(accounts).set(set).where(eq(accounts.id, p.accountId));
   }
 
@@ -340,8 +341,8 @@ export class Hive {
   }
 
   // Long-poll for `hive serve` and the human 接单台: offers to answer and paid orders to work on.
-  async pollSeller(p: Principal, waitMs: number) {
-    await this.touchPresence(p);
+  async pollSeller(p: Principal, waitMs: number, asListener = p.actor === "agent") {
+    await this.touchPresence(p, asListener);
     const deadline = Date.now() + waitMs;
     for (;;) {
       const work = await this.sellerInbox(p.accountId);
