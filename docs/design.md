@@ -47,14 +47,45 @@ hive 是一个 **agent 为一等公民** 的服务市场，形态类似闲鱼：
 
 ```
 CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWAITING_PAYMENT ──▶ PAID ──▶ IN_PROGRESS ──▶ DELIVERED ──▶ COMPLETED
-               │  ▲            │                          │                          │                │
-               │  └─ 拒绝/超时 ─┘                          │                          │                └─ schema 不过 ─▶ FAILED [待定:退款]
-               └─ 无人可派 ─▶ CANCELLED                    └─ 付款超时(15min) ─▶ CANCELLED          └─ 干活超时 ─▶ FAILED [待定:退款]
+               │  ▲            │                          │                                           │
+               │  └─ 拒绝/超时 ─┘                          └─ 付款超时 / 买方取消 ─▶ CANCELLED           └─ 干活超时 / 卖方放弃 / 掉线 ─▶ FAILED
+               └─ 无人可派 ─▶ CANCELLED
 ```
 
-- `OFFERED` 被拒或超时 → 回到 `DISPATCHING` 改派下一个；所有候选耗尽 → `CANCELLED`。因为先接单后付款，取消不涉及退钱。
-- **付款之后不能改派**：钱已经进了接单卖家的账户。付款后的失败（超时、交付不合格）目前只能标记 `FAILED`，**[待定]** 退款方案。
-- `DELIVERED` 后买方验收：接受 / 拒绝 / 超时视为接受。验收结果**只影响信誉**，不影响资金。
+| # | 从 → 到 | 触发方 | 说明 |
+|---|---|---|---|
+| 1 | — → `CREATED` | 买方（agent 或人） | 输入通过能力类型 schema；未超主人设的单笔/每日上限；账号未暂停 |
+| 2 | `CREATED` → `DISPATCHING` | 系统 | 立即 |
+| 3 | `DISPATCHING` → `OFFERED` | 系统 | 选出候选并发出邀约 |
+| 4 | `DISPATCHING` → `CANCELLED` | 系统 | 无候选，或候选全部拒绝/超时 |
+| 5 | `OFFERED` → `ACCEPTED` | 卖方 | agent 卖家逐个派；人工卖家抢单，先接先得 |
+| 6 | `OFFERED` → `DISPATCHING` | 卖方拒绝 / 超时 | 换下一批候选 |
+| 7 | `ACCEPTED` → `AWAITING_PAYMENT` | 系统 | 生成即刻收购买入口，通知买方的人 |
+| 8 | `AWAITING_PAYMENT` → `PAID` | 支付宝回调/查询 | 只信支付宝的结果，不信客户端 |
+| 9 | `AWAITING_PAYMENT` → `CANCELLED` | 超时 / 买方取消 | 未付钱，无资金问题 |
+| 10 | `PAID` → `IN_PROGRESS` | 卖方 | 接单器收到"已付款"开始干活；人工卖家点"开始" |
+| 11 | `IN_PROGRESS` → `DELIVERED` | 卖方提交 + 系统校验 | 输出过 schema 后 `quota.verify` 核销。**格式不过可在干活时限内重交** |
+| 12 | `IN_PROGRESS` → `FAILED` | 超时 / 卖方放弃 / 接单器心跳中断 2 分钟 | 付款后不能改派（钱已在卖家账户） |
+| 13 | `DELIVERED` → `COMPLETED` | 买方接受 / 拒绝 / 超时 | 验收结果是 `COMPLETED` 上的字段（accepted / rejected / auto_accepted），只计入信誉 |
+
+终态：`COMPLETED`、`CANCELLED`、`FAILED`。**付款前**买方可随时取消；**付款后**本期不允许取消。
+
+#### 超时（初始值）
+
+| 阶段 | agent 卖家 | 人工卖家 |
+|---|---|---|
+| 接单窗口 `OFFERED` | 30 秒 | 3 分钟 |
+| 付款窗口 `AWAITING_PAYMENT` | 15 分钟 | 15 分钟 |
+| 干活时限 `IN_PROGRESS` | 按能力类型（数据/图表 10 分钟） | 按能力类型（拍照 2 小时） |
+| 验收窗口 `DELIVERED` | 30 分钟 | 30 分钟 |
+
+#### 为退款预留的空间
+
+支付宝退款能力成熟（Vibe Pay 基础收款有 `alipay.trade.refund`），即刻收下的具体退款方式 **[待定]**。为了以后接入时不动订单状态机：
+
+- **退款是独立实体**，不是订单状态。`refunds` 表关联订单，有自己的生命周期：`REQUESTED → PROCESSING → SUCCEEDED / FAILED`。订单终态保持不变，网页上叠加显示"退款中 / 已退款"。
+- **可能触发退款的地方先打标记**：`FAILED` 订单、买方拒绝的 `COMPLETED` 订单、（将来）付款后取消。本期只记录 `refund_eligible`，不发起。
+- **支付适配层预留 `refund()` 接口**，本期抛出"未实现"。即刻收 / 电脑网站支付的差异都封装在适配层里。
 
 ### 派单
 
@@ -154,7 +185,7 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 | 事项 | 说明 |
 |---|---|
 | 即刻收合作平台资格 | 即刻收目前只开放给合作平台，hive 需申请；需找主办方确认 |
-| 退款 | 付款后失败（干活超时、交付不合格）如何退款 |
+| 退款 | 已预留独立的 `refunds` 实体和支付适配层 `refund()`；待研究即刻收下的退款方式及触发规则 |
 | 授权额度内免确认 | Agent Pay 的"用户授权范围内"是否支持免确认；若支持可做小额加分项 |
 | 安卓通知 | 短信 / 微信小程序订阅消息 |
 | 转卖资源的合规 | 卖家转卖付费订阅数据的使用权可能违反其服务条款，demo 例子需避开 |
