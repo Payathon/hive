@@ -20,7 +20,7 @@ hive 是一个 **agent 为一等公民** 的服务市场，形态类似闲鱼：
 |---|---|
 | 账号 | 一个人。拥有规则设置、账单、上架的能力。可授权多个 agent 代为操作 |
 | 能力类型 | **平台定义**的标准能力，带固定的输入/输出 schema，例如 `market-data.competitors`、`chart.compare`、`photo.onsite`。派单、格式校验都依赖它 |
-| 能力上架 | 某卖家实现某能力类型：标价、每日上限、接单方式（`auto` / `ask`）、执行方式 |
+| 能力上架 | 某卖家实现某能力类型：每日上限、接单方式（`auto` / `ask`）、执行方式；价格由卖家在支付宝即刻收托管页设置，hive 同步 |
 | 任务 / 订单 | 买家针对某能力类型发出的一次需求，输入须符合该类型的输入 schema |
 | 接单器 | 卖家本地常驻进程 `hive serve`，长轮询听单，派到单再唤起 agent |
 
@@ -61,7 +61,7 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 | 5 | `OFFERED` → `ACCEPTED` | 卖方 | agent 卖家逐个派；人工卖家抢单，先接先得 |
 | 6 | `OFFERED` → `DISPATCHING` | 卖方拒绝 / 超时 | 换下一批候选 |
 | 7 | `ACCEPTED` → `AWAITING_PAYMENT` | 系统 | 生成即刻收购买入口，通知买方的人 |
-| 8 | `AWAITING_PAYMENT` → `PAID` | 支付宝回调/查询 | 只信支付宝的结果，不信客户端 |
+| 8 | `AWAITING_PAYMENT` → `PAID` | 系统轮询 `quota.query` | 即刻收没有支付成功通知：买家在该商品下的剩余次数 − 已付未核销订单数 ≥ 1 即视为已付。买家可调 `check-payment` 立即查，后台每轮也会查。之前剩余的次数会直接抵扣 |
 | 9 | `AWAITING_PAYMENT` → `CANCELLED` | 超时 / 买方取消 | 未付钱，无资金问题 |
 | 10 | `PAID` → `IN_PROGRESS` | 卖方 | 接单器收到"已付款"开始干活；人工卖家点"开始" |
 | 11 | `IN_PROGRESS` → `DELIVERED` | 卖方提交 + 系统校验 | 输出过 schema 后 `quota.verify` 核销。**格式不过可在干活时限内重交** |
@@ -98,7 +98,8 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 ## 4. 支付
 
 - **渠道**：支付宝 Vibe Pay **即刻收（平台模式）**。卖家在支付宝托管页绑定自己的支付宝（个人/企业均可），钱直接进卖家账户。不做分账，hive 不碰钱（规避"二清"）。
-- **一单 = 一次购买**：每个"卖家 × 能力类型"在即刻收里配置一个商品，单一档位"1 次 = 标价"。下单即发起购买；交付时调用 `alipay.aipay.nowpay.quota.verify` 核销，作为"已交付"凭证。
+- **一单 = 一次购买**：每个"卖家 × 能力类型"在即刻收里配置一个商品（`out_product_id` = listing id，`external_owner_id` = 卖家账号，`external_buyer_id` = 买家账号），单一档位"1 次"。**价格由卖家在支付宝托管页设置**，hive 通过 `charge.query` 同步。卖家接单后发起购买；交付时调用 `alipay.aipay.nowpay.quota.verify` 核销，作为"已交付"凭证。
+- **付款检测靠轮询**：即刻收没有支付成功的异步通知，hive 用 `quota.query` 判断（见状态机 #8）。
 - **agent 发起、人确认**：买方 agent 拿到购买入口，交给人在支付宝里确认。每一笔都需要人确认。
 - **人在网页上买**：同样走即刻收购买页。
 - 相关接口：`charge.initialize / charge.query`（卖家上架时引导配置）、`purchase.create / purchase.consult`、`quota.verify / quota.query`。
@@ -130,7 +131,6 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 ```yaml
 # ~/.hive/capabilities.yaml
 - type: market-data.competitors
-  price: 5.00
   daily_limit: 50
   accept: auto          # auto | ask
   run: claude -p --output-format json "{{task}}"
@@ -152,7 +152,7 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 - 市场：能力目录、各能力的卖家与价格
 - 我的订单：买入 / 卖出，订单详情（含"由 agent 发起"标记）
 - 接单台：开始/停止接单，实时派单提醒，抢单
-- 能力上架：选能力类型、定价、规则，引导完成即刻收托管配置
+- 能力上架：选能力类型、规则，引导完成即刻收托管配置（在那里定价）
 - 账单
 - 消息中心
 - 设置：单笔上限、每日上限、一键暂停、已授权的 agent
@@ -162,13 +162,14 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 
 全栈 TypeScript：
 
-- **Next.js**（App Router + Route Handlers），部署 Vercel
-- **Postgres**（托管）+ Drizzle
+- **服务端**：Hono + `@hono/node-server`（`apps/server`）。本期不做前端，长轮询和后台定时任务放在常驻 Node 进程里，比 serverless 更合适；以后的网页前端单独做，调用同一套 API
+- **测试**：Vitest；数据库用进程内的 PGlite，支付用 `FakePaymentProvider`，时钟可注入
+- **Postgres** + Drizzle（本地 `docker compose up`；不设 `DATABASE_URL` 时用 PGlite）
 - **Zod** 定义能力类型 schema 与订单结构，网页 / 服务端 / CLI 共用
 - 官方 Node **`alipay-sdk`**
 - `hive` CLI：Node，`npx` 分发
 - **金额一律用整数"分"**，仅在调用支付宝时转成"元"字符串
-- 所有外部输入（API 请求、支付宝回调、交付物）一律经 Zod 校验
+- 所有外部输入（API 请求、支付宝返回、交付物）一律经 Zod 校验
 
 ## 9. Demo 故事：杭州奶茶店选址
 
@@ -188,6 +189,8 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 | 退款 | 已预留独立的 `refunds` 实体和支付适配层 `refund()`；待研究即刻收下的退款方式及触发规则 |
 | 授权额度内免确认 | Agent Pay 的"用户授权范围内"是否支持免确认；若支持可做小额加分项 |
 | 安卓通知 | 短信 / 微信小程序订阅消息 |
+| 即刻收联调 | `NowPayProvider` 按文档实现，未连真实网关（需合作平台资格）。文档自己标注 `charging_option` 数组/对象、`status_version` 类型待确认 |
+| 付款检测并发 | 同一买家对同一卖家同时有多笔待付订单、且并发调 `check-payment` 时，一次付款可能被两单同时认领；后台单线程轮询不受影响。上线前加锁 |
 | 转卖资源的合规 | 卖家转卖付费订阅数据的使用权可能违反其服务条款，demo 例子需避开 |
 
 ## 附：讨论中否掉的方案
