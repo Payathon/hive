@@ -2,14 +2,14 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { ApiError, HiveClient, yuan, type Order } from "./api.ts";
 import { loadCapabilities } from "./capabilities-file.ts";
-import { hiveHome, loadConfig, saveConfig } from "./config.ts";
+import { hiveHome, loadConfig, saveConfig, type Config } from "./config.ts";
 import { Listener } from "./listener.ts";
 
 const HELP = `hive — agent-first service market
 
 Account
   hive signup <name>                 create an account (owner token, saved locally)
-  hive login                         bind this agent to an account (device flow)
+  hive login [--wait]                bind this agent to an account; prints a code for the owner
   hive approve <code>                approve an agent login (owner token)
   hive whoami
 
@@ -50,6 +50,29 @@ async function main(argv: string[]) {
 
   const config = await loadConfig();
   if (values.server) config.server = values.server;
+
+  // Finishes a pending `hive login` if the owner has approved it since.
+  async function completeLogin(): Promise<Config> {
+    if (config.token || !config.pendingLogin) return config;
+    const anon = new HiveClient(config.server, null);
+    const { id, secret } = config.pendingLogin;
+    const r: { status: string; token?: string } = await anon
+      .request<{ status: string; token?: string }>("POST", `/v1/device-logins/${id}/poll`, { secret })
+      .catch((err) => {
+        if (err instanceof ApiError && err.status === 404) return { status: "expired" };
+        throw err;
+      });
+    if (r.status === "approved" && r.token) {
+      config.token = r.token;
+      config.pendingLogin = null;
+      await saveConfig(config);
+    } else if (r.status === "expired") {
+      config.pendingLogin = null;
+      await saveConfig(config);
+    }
+    return config;
+  }
+  if (cmd !== "login" && cmd !== "signup") await completeLogin();
   const client = new HiveClient(config.server, config.token);
   const print = (o: unknown, text?: string) => console.log(values.json || !text ? JSON.stringify(o, null, 2) : text);
   const need = (what: string) => {
@@ -60,24 +83,24 @@ async function main(argv: string[]) {
   switch (cmd) {
     case "signup": {
       const r = await client.request<{ accountId: string; token: string }>("POST", "/v1/accounts", { name: need("name") });
-      await saveConfig({ server: config.server, token: r.token });
+      await saveConfig({ server: config.server, token: r.token, pendingLogin: null });
       return print(r, `account ${r.accountId} created; owner token saved to ${hiveHome()}`);
     }
 
     case "login": {
-      const dl = await client.request<{ id: string; userCode: string; secret: string }>("POST", "/v1/device-logins", {
-        label: process.env.HIVE_AGENT_NAME ?? "agent",
-      });
-      console.log(`Ask the account owner to approve this agent:\n\n    hive approve ${dl.userCode}\n`);
-      for (;;) {
-        await sleep(2000);
-        const r = await client.request<{ status: string; token?: string }>("POST", `/v1/device-logins/${dl.id}/poll`, {
-          secret: dl.secret,
+      // Prints the code and returns at once so an agent can hand it to the owner;
+      // any later command (e.g. `hive whoami`) picks up the token once approved.
+      if (!values.wait || !config.pendingLogin) {
+        const dl = await client.request<{ id: string; userCode: string; secret: string }>("POST", "/v1/device-logins", {
+          label: process.env.HIVE_AGENT_NAME ?? "agent",
         });
-        if (r.status === "approved" && r.token) {
-          await saveConfig({ server: config.server, token: r.token });
-          return console.log("approved; agent token saved");
-        }
+        await saveConfig({ ...config, pendingLogin: { id: dl.id, secret: dl.secret } });
+        console.log(`Ask the account owner to approve this agent:\n\n    hive approve ${dl.userCode}\n`);
+        if (!values.wait) return console.log("Then run `hive whoami` to confirm. (`hive login --wait` blocks until approved.)");
+      }
+      for (;;) {
+        if ((await completeLogin()).token) return console.log("approved; agent token saved");
+        await sleep(2000);
       }
     }
 

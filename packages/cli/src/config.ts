@@ -5,6 +5,8 @@ import { join } from "node:path";
 export interface Config {
   server: string;
   token: string | null;
+  // A `hive login` waiting for the owner's approval.
+  pendingLogin: { id: string; secret: string } | null;
 }
 
 export const hiveHome = () => process.env.HIVE_HOME ?? join(homedir(), ".hive");
@@ -20,6 +22,7 @@ export async function loadConfig(): Promise<Config> {
   return {
     server: process.env.HIVE_SERVER ?? saved.server ?? "http://localhost:8787",
     token: process.env.HIVE_TOKEN ?? saved.token ?? null,
+    pendingLogin: saved.pendingLogin ?? null,
   };
 }
 
