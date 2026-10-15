@@ -1,9 +1,11 @@
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { ApiError, HiveClient, yuan, type Order } from "./api.ts";
+import { completeLogin, describe, paymentPrompt, placeOrder, startLogin, waitForCaller, waitForPayment } from "./buyer.ts";
 import { loadCapabilities } from "./capabilities-file.ts";
-import { hiveHome, loadConfig, saveConfig, type Config } from "./config.ts";
+import { hiveHome, loadConfig, saveConfig } from "./config.ts";
 import { Listener } from "./listener.ts";
+import { serveMcp } from "./mcp.ts";
 
 const HELP = `hive — agent-first service market
 
@@ -22,15 +24,13 @@ Buying
   hive cancel <order>                only before payment
   hive orders [--seller]             recent orders
   hive bill                          what was paid and earned
+  hive mcp                           the buying commands as an MCP server (stdio)
 
 Selling
   hive serve [--capabilities <file>] listen for orders (default ~/.hive/capabilities.yaml)
 
 Options: --server <url> (or HIVE_SERVER), --json`;
 
-const TERMINAL = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
-const NEEDS_CALLER = new Set(["AWAITING_PAYMENT", "DELIVERED"]);
-const UNANSWERED = new Set(["CREATED", "DISPATCHING", "OFFERED", "ACCEPTED"]);
 const ORDER_WAIT_MS = Number(process.env.HIVE_ORDER_WAIT_MS ?? 45_000);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -54,28 +54,7 @@ async function main(argv: string[]) {
   const config = await loadConfig();
   if (values.server) config.server = values.server;
 
-  // Finishes a pending `hive login` if the owner has approved it since.
-  async function completeLogin(): Promise<Config> {
-    if (config.token || !config.pendingLogin) return config;
-    const anon = new HiveClient(config.server, null);
-    const { id, secret } = config.pendingLogin;
-    const r: { status: string; token?: string } = await anon
-      .request<{ status: string; token?: string }>("POST", `/v1/device-logins/${id}/poll`, { secret })
-      .catch((err) => {
-        if (err instanceof ApiError && err.status === 404) return { status: "expired" };
-        throw err;
-      });
-    if (r.status === "approved" && r.token) {
-      config.token = r.token;
-      config.pendingLogin = null;
-      await saveConfig(config);
-    } else if (r.status === "expired") {
-      config.pendingLogin = null;
-      await saveConfig(config);
-    }
-    return config;
-  }
-  if (cmd !== "login" && cmd !== "signup") await completeLogin();
+  if (cmd !== "login" && cmd !== "signup") await completeLogin(config);
   const client = new HiveClient(config.server, config.token);
   const print = (o: unknown, text?: string) => console.log(values.json || !text ? JSON.stringify(o, null, 2) : text);
   const need = (what: string) => {
@@ -94,15 +73,12 @@ async function main(argv: string[]) {
       // Prints the code and returns at once so an agent can hand it to the owner;
       // any later command (e.g. `hive whoami`) picks up the token once approved.
       if (!values.wait || !config.pendingLogin) {
-        const dl = await client.request<{ id: string; userCode: string; secret: string }>("POST", "/v1/device-logins", {
-          label: process.env.HIVE_AGENT_NAME ?? "agent",
-        });
-        await saveConfig({ ...config, pendingLogin: { id: dl.id, secret: dl.secret } });
-        console.log(`Ask the account owner to approve this agent:\n\n    hive approve ${dl.userCode}\n`);
+        const code = await startLogin(config, process.env.HIVE_AGENT_NAME ?? "agent");
+        console.log(`Ask the account owner to approve this agent:\n\n    hive approve ${code}\n`);
         if (!values.wait) return console.log("Then run `hive whoami` to confirm. (`hive login --wait` blocks until approved.)");
       }
       for (;;) {
-        if ((await completeLogin()).token) return console.log("approved; agent token saved");
+        if ((await completeLogin(config)).token) return console.log("approved; agent token saved");
         await sleep(2000);
       }
     }
@@ -121,33 +97,20 @@ async function main(argv: string[]) {
 
     case "order": {
       if (!values.input) throw new Error("usage: hive order <type> --input '<json>'");
-      let order = await client.createOrder(need("type"), JSON.parse(values.input));
-      // Agent sellers answer within seconds; waiting here means the caller gets the payment link immediately.
-      const until = Date.now() + ORDER_WAIT_MS;
-      while (UNANSWERED.has(order.status) && order.offerKind !== "human" && Date.now() < until) {
-        await sleep(1000);
-        order = await client.order(order.id);
-      }
+      const order = await placeOrder(client, need("type"), JSON.parse(values.input), Date.now() + ORDER_WAIT_MS);
       return print(order, describe(order));
     }
 
     case "pay": {
       let order = await client.order(need("order"));
       if (order.status === "AWAITING_PAYMENT") console.log(paymentPrompt(order));
-      while (values.wait && order.status === "AWAITING_PAYMENT") {
-        await sleep(3000);
-        order = await client.orderAction(order.id, "check-payment");
-      }
+      if (values.wait) order = await waitForPayment(client, order, Infinity);
       return print(order, describe(order));
     }
 
     case "status": {
       let order = await client.order(need("order"));
-      // Stops where the caller has to act: payment to hand to the owner, or a delivery to review.
-      while (values.wait && !TERMINAL.has(order.status) && !NEEDS_CALLER.has(order.status)) {
-        await sleep(3000);
-        order = await client.order(order.id);
-      }
+      if (values.wait) order = await waitForCaller(client, order, Infinity);
       return print(order, describe(order));
     }
 
@@ -172,6 +135,9 @@ async function main(argv: string[]) {
       return print(bill, `spent ${yuan(bill.spentFen)}, earned ${yuan(bill.earnedFen)}`);
     }
 
+    case "mcp":
+      return serveMcp();
+
     case "serve": {
       const file = values.capabilities ?? join(hiveHome(), "capabilities.yaml");
       const listener = new Listener(client, await loadCapabilities(file));
@@ -182,25 +148,6 @@ async function main(argv: string[]) {
     default:
       throw new Error(`unknown command ${cmd}\n\n${HELP}`);
   }
-}
-
-function paymentPrompt(o: Order) {
-  return [
-    `Payment needed: ${yuan(o.priceFen)} for ${o.capabilityType}.`,
-    "Ask the owner to confirm in Alipay:",
-    `  ${o.purchaseUrl}`,
-    ...(o.purchaseQrCode ? [`  QR: ${o.purchaseQrCode}`] : []),
-  ].join("\n");
-}
-
-function describe(o: Order): string {
-  const lines = [`${o.id}  ${o.status}  ${o.capabilityType}  ${yuan(o.priceFen)}`];
-  if (o.status === "OFFERED") lines.push(`offered to ${o.offerKind} seller(s), waiting for acceptance`);
-  if (o.status === "AWAITING_PAYMENT") lines.push(paymentPrompt(o));
-  if (o.status === "DELIVERED") lines.push("output:", JSON.stringify(o.output, null, 2), `review with: hive accept ${o.id}  |  hive reject ${o.id}`);
-  if (o.cancelReason) lines.push(`cancelled: ${o.cancelReason}`);
-  if (o.failReason) lines.push(`failed: ${o.failReason}`);
-  return lines.join("\n");
 }
 
 main(process.argv.slice(2)).catch((err) => {

@@ -8,7 +8,7 @@ agent 为一等公民的服务市场：agent 找服务、下单、验收，人�
 |---|---|
 | `packages/core` | 领域模型：金额（分）、能力类型 schema、订单状态机、派单排序。纯函数，无 IO |
 | `apps/server` | API 服务（Hono + Drizzle/Postgres）、即刻收支付适配、后台定时任务 |
-| `packages/cli` | `hive` 命令行：买家命令、`hive serve` 接单器；`skill/hive/SKILL.md` 给 agent 用 |
+| `packages/cli` | `hive` 命令行：买家命令、`hive serve` 接单器、`hive mcp` 买家 MCP；`skill/hive/SKILL.md` 给 agent 用 |
 | `seed` | demo 用的种子卖家（竞品数据、对比图表） |
 
 ## 本地运行
@@ -49,6 +49,20 @@ HIVE_HOME=/tmp/buyer hive accept <order-id>
 ```
 
 agent 绑定账号：agent 执行 `hive login`，主人执行打印出来的 `hive approve <code>`。
+
+## 买家用 MCP
+
+`hive mcp` 以 stdio MCP server 的形式提供买家工具（`hive_types`、`hive_order`、`hive_pay`、`hive_status`、`hive_accept` 等），和 CLI 共用 `~/.hive` 里的登录状态。在 MCP 客户端里这样配置：
+
+```json
+{
+  "mcpServers": {
+    "hive": { "command": "node", "args": ["/path/to/packages/cli/dist/hive.mjs", "mcp"], "env": { "HIVE_SERVER": "http://localhost:8787" } }
+  }
+}
+```
+
+Claude Code 里可以直接执行：`claude mcp add hive -e HIVE_SERVER=http://localhost:8787 -- node $PWD/packages/cli/dist/hive.mjs mcp`。登录流程不变：agent 调用 `hive_login`，主人执行 `hive approve <code>`。
 
 ## 测试
 
