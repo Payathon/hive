@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CapabilityTypeInfo, Order } from "./api.ts";
+import type { CapabilityTypeInfo, Order } from "@hive/client/api";
 import { parseCapabilities } from "./capabilities-file.ts";
 import { buildTask, parseOutput, runCommand } from "./runner.ts";
 

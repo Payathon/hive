@@ -8,7 +8,8 @@ agent 为一等公民的服务市场：agent 找服务、下单、验收，人�
 |---|---|
 | `packages/core` | 领域模型：金额（分）、能力类型 schema、订单状态机、派单排序。纯函数，无 IO |
 | `apps/server` | API 服务（Hono + Drizzle/Postgres）、即刻收支付适配、后台定时任务 |
-| `packages/cli` | `hive` 命令行：买家命令、`hive serve` 接单器、`hive mcp` 买家 MCP；`skill/hive/SKILL.md` 给 agent 用 |
+| `packages/client` | HTTP 客户端、买家流程和 MCP 工具定义，CLI 与服务端 `/mcp` 共用 |
+| `packages/cli` | `hive` 命令行：买家命令、`hive serve` 接单器、`hive mcp` 本地 MCP；`skill/hive/SKILL.md` 给 agent 用 |
 | `seed` | demo 用的种子卖家（竞品数据、对比图表） |
 
 ## 本地运行
@@ -52,17 +53,29 @@ agent 绑定账号：agent 执行 `hive login`，主人执行打印出来的 `hi
 
 ## 买家用 MCP
 
-`hive mcp` 以 stdio MCP server 的形式提供买家工具（`hive_types`、`hive_order`、`hive_pay`、`hive_status`、`hive_accept` 等），和 CLI 共用 `~/.hive` 里的登录状态。在 MCP 客户端里这样配置：
+两种接法，工具相同（`hive_types`、`hive_order`、`hive_pay`、`hive_status`、`hive_accept` 等）：
+
+**远程（推荐）**：主人用 owner token 生成一个 API key，填进 MCP 客户端。
+
+```sh
+hive api-key cursor     # 打印 key 和 MCP 地址，key 只显示一次
+```
 
 ```json
 {
   "mcpServers": {
-    "hive": { "command": "node", "args": ["/path/to/packages/cli/dist/hive.mjs", "mcp"], "env": { "HIVE_SERVER": "http://localhost:8787" } }
+    "hive": { "url": "http://localhost:8787/mcp", "headers": { "Authorization": "Bearer <key>" } }
   }
 }
 ```
 
-Claude Code 里可以直接执行：`claude mcp add hive -e HIVE_SERVER=http://localhost:8787 -- node $PWD/packages/cli/dist/hive.mjs mcp`。登录流程不变：agent 调用 `hive_login`，主人执行 `hive approve <code>`。
+Claude Code：`claude mcp add --transport http hive http://localhost:8787/mcp --header "Authorization: Bearer <key>"`。API key 是 agent 身份，下的单记为 agent 发起；owner token 不能用于 `/mcp`。
+
+**本地**：`hive mcp` 是 stdio MCP server，和 CLI 共用 `~/.hive` 的登录（agent 调 `hive_login`，主人执行 `hive approve <code>`）。
+
+```sh
+claude mcp add hive -e HIVE_SERVER=http://localhost:8787 -- node $PWD/packages/cli/dist/hive.mjs mcp
+```
 
 ## 测试
 

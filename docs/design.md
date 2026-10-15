@@ -109,7 +109,10 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 买卖双方共用一个 CLI，通过 `npx` 分发，配一份 SKILL.md 教 agent 何时用哪条命令（与支付宝 `alipay-bot` + skill 同一套路）。
 
-买家也可以走 MCP：`hive mcp` 把买家命令包成 stdio MCP 工具（`hive_order`、`hive_pay`、`hive_status` 等），登录状态与 CLI 共用 `~/.hive`。不提供 approve 工具，agent 不能批准自己的登录。接单只走 `hive serve`，因为接单器得常驻本地进程。
+买家也可以走 MCP，工具相同（`hive_order`、`hive_pay`、`hive_status` 等），不提供 approve 工具，agent 不能批准自己的登录。接单只走 `hive serve`，因为接单器得常驻本地进程。
+
+- **远程**：服务端 `/mcp`（Streamable HTTP，无状态），用 API key 鉴权。API key 由主人 `hive api-key` 生成，是 agent 身份的 token。国内 MCP 普遍用 API key；OAuth（claude.ai 网页版等需要）**[待定]**，认人一步以后接支付宝登录。
+- **本地**：`hive mcp`（stdio），登录状态与 CLI 共用 `~/.hive`。
 
 | 命令 | 作用 |
 |---|---|

@@ -1,4 +1,4 @@
-import { ApiError, HiveClient, yuan, type CapabilityTypeInfo, type Order } from "./api.ts";
+import { ApiError, HiveClient, yuan, type CapabilityTypeInfo, type Order } from "@hive/client/api";
 import type { CapabilityEntry } from "./capabilities-file.ts";
 import { buildTask, parseOutput, runCommand } from "./runner.ts";
 

@@ -1,5 +1,8 @@
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { Hono, type Context } from "hono";
 import { z } from "zod";
+import { HiveClient } from "@hive/client/api";
+import { createMcpServer } from "@hive/client/mcp";
 import { capabilityTypes } from "@hive/core";
 import { Hive, HiveError, type Principal } from "./hive.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
@@ -62,6 +65,22 @@ export function createApp(hive: Hive) {
     return c.json(await hive.pollDeviceLogin(c.req.param("id"), secret));
   });
 
+  // ---- remote MCP -------------------------------------------------------
+  // The buying tools over Streamable HTTP, keyed by an agent token (`hive api-key`).
+  // Stateless: each request gets its own server, and tools call this app in-process with the caller's key.
+
+  app.all("/mcp", async (c) => {
+    const key = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
+    const principal = key ? await hive.authenticate(key) : null;
+    if (!principal) throw new HiveError(401, "unauthorized", "send an API key from `hive api-key` as a Bearer token");
+    if (principal.actor !== "agent") throw new HiveError(403, "agents_only", "use an API key from `hive api-key`, not the owner token");
+    const client = new HiveClient("http://hive.internal", key!, (url, init) => Promise.resolve(app.fetch(new Request(url, init))));
+    const server = createMcpServer({ client: async () => client, unauthorizedHint: "The API key was revoked; ask the owner for a new one." });
+    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
+    await server.connect(transport);
+    return transport.handleRequest(c.req.raw);
+  });
+
   // ---- authenticated ----------------------------------------------------
 
   const authed = new Hono<Env>();
@@ -78,6 +97,11 @@ export function createApp(hive: Hive) {
     const { userCode } = await body(c, z.object({ userCode: z.string() }));
     await hive.approveDeviceLogin(me(c), userCode);
     return c.json({ ok: true });
+  });
+
+  authed.post("/api-keys", async (c) => {
+    const { label } = await body(c, z.object({ label: z.string().max(64).optional() }));
+    return c.json(await hive.createApiKey(me(c), label ?? null), 201);
   });
 
   authed.get("/me", async (c) => {

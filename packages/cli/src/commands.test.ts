@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
-import { HiveClient } from "./api.ts";
+import { HiveClient } from "@hive/client/api";
 import { Listener } from "./listener.ts";
 import { startTestServer } from "./test-server.ts";
 

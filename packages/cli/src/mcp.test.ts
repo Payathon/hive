@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, expect, it } from "vitest";
-import { HiveClient } from "./api.ts";
+import { HiveClient } from "@hive/client/api";
 import { Listener } from "./listener.ts";
 import { createMcpServer } from "./mcp.ts";
 import { startTestServer } from "./test-server.ts";

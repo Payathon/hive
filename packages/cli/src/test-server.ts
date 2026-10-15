@@ -5,7 +5,7 @@ import { createApp } from "@hive/server/app";
 import { connectPglite } from "@hive/server/db";
 import { Hive } from "@hive/server/hive";
 import { FakePaymentProvider } from "@hive/server/payments/fake";
-import { HiveClient } from "./api.ts";
+import { HiveClient } from "@hive/client/api";
 
 // A real HTTP server (PGlite + fake payments) so CLI code runs exactly as in production.
 export async function startTestServer() {

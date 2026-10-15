@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inputs, setup, validOutputs } from "./test-helpers.ts";
+import { BASE, inputs, setup, validOutputs } from "./test-helpers.ts";
 
 const DATA = "market-data.competitors";
 const PHOTO = "photo.onsite";
@@ -31,6 +31,46 @@ describe("accounts and auth", () => {
     const dl = await t.ok("POST", "/v1/device-logins", undefined, {});
     expect((await t.call("POST", "/v1/device-logins/approve", agent, { userCode: dl.userCode })).status).toBe(403);
     expect((await t.call("PATCH", "/v1/me/rules", agent, { paused: true })).status).toBe(403);
+  });
+
+  it("lets only the owner create API keys, which act as agents", async () => {
+    const t = await setup();
+    const alice = await t.account("alice");
+    const { key } = await t.ok("POST", "/v1/api-keys", alice.token, { label: "cursor" });
+    expect((await t.ok("GET", "/v1/me", key)).actor).toBe("agent");
+    expect((await t.call("POST", "/v1/api-keys", key, {})).status).toBe(403);
+  });
+});
+
+describe("remote MCP", () => {
+  const rpc = (app: { request: (url: string, init: RequestInit) => Response | Promise<Response> }, token: string | null, method: string, params = {}) =>
+    app.request(`${BASE}/mcp`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+
+  it("needs an agent API key", async () => {
+    const t = await setup();
+    const alice = await t.account("alice");
+    expect((await rpc(t.app, null, "tools/list")).status).toBe(401);
+    expect((await rpc(t.app, alice.token, "tools/list")).status).toBe(403);
+  });
+
+  it("serves the buying tools with the caller's key, without a login tool", async () => {
+    const t = await setup();
+    const alice = await t.account("alice");
+    const { key } = await t.ok("POST", "/v1/api-keys", alice.token, {});
+    const list = await (await rpc(t.app, key, "tools/list")).json();
+    const names = list.result.tools.map((x: { name: string }) => x.name);
+    expect(names).toContain("hive_order");
+    expect(names).not.toContain("hive_login");
+    const me = await (await rpc(t.app, key, "tools/call", { name: "hive_whoami", arguments: {} })).json();
+    expect(JSON.parse(me.result.content[0].text)).toMatchObject({ name: "alice", actor: "agent" });
   });
 });
 

@@ -1,5 +1,4 @@
-import { ApiError, HiveClient, yuan, type Order } from "./api.ts";
-import { saveConfig, type Config } from "./config.ts";
+import { yuan, type HiveClient, type Order } from "./api.ts";
 
 // Buyer flows shared by the CLI and the MCP server. Waits take an absolute deadline
 // (Infinity for the CLI's --wait) and return the order as last seen.
@@ -8,40 +7,6 @@ const TERMINAL = new Set(["COMPLETED", "CANCELLED", "FAILED"]);
 const NEEDS_CALLER = new Set(["AWAITING_PAYMENT", "DELIVERED"]);
 const UNANSWERED = new Set(["CREATED", "DISPATCHING", "OFFERED", "ACCEPTED"]);
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-// Starts a device login; the owner approves the returned code with `hive approve <code>`.
-export async function startLogin(config: Config, label: string) {
-  const dl = await new HiveClient(config.server, null).request<{ id: string; userCode: string; secret: string }>(
-    "POST",
-    "/v1/device-logins",
-    { label },
-  );
-  config.pendingLogin = { id: dl.id, secret: dl.secret };
-  await saveConfig(config);
-  return dl.userCode;
-}
-
-// Finishes a pending login if the owner has approved it since.
-export async function completeLogin(config: Config): Promise<Config> {
-  if (config.token || !config.pendingLogin) return config;
-  const anon = new HiveClient(config.server, null);
-  const { id, secret } = config.pendingLogin;
-  const r: { status: string; token?: string } = await anon
-    .request<{ status: string; token?: string }>("POST", `/v1/device-logins/${id}/poll`, { secret })
-    .catch((err) => {
-      if (err instanceof ApiError && err.status === 404) return { status: "expired" };
-      throw err;
-    });
-  if (r.status === "approved" && r.token) {
-    config.token = r.token;
-    config.pendingLogin = null;
-    await saveConfig(config);
-  } else if (r.status === "expired") {
-    config.pendingLogin = null;
-    await saveConfig(config);
-  }
-  return config;
-}
 
 // Agent sellers answer within seconds; waiting here means the caller gets the payment link immediately.
 export async function placeOrder(client: HiveClient, type: string, input: unknown, deadline: number) {

@@ -111,6 +111,14 @@ export class Hive {
     return { id, userCode, secret, expiresAt };
   }
 
+  // An agent token for MCP clients that take a key instead of running `hive login`.
+  async createApiKey(p: Principal, label: string | null) {
+    if (p.actor !== "human") throw new HiveError(403, "humans_only", "only the account owner can create API keys");
+    const key = newToken();
+    await this.db.insert(tokens).values({ tokenHash: sha256(key), accountId: p.accountId, actor: "agent", label });
+    return { key };
+  }
+
   // Called by a signed-in human to bind the waiting CLI to their account as an agent.
   async approveDeviceLogin(p: Principal, userCode: string) {
     if (p.actor !== "human") throw new HiveError(403, "humans_only", "only the account owner can approve an agent");

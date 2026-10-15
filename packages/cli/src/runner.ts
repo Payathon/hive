@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CapabilityTypeInfo, Order } from "./api.ts";
+import type { CapabilityTypeInfo, Order } from "@hive/client/api";
 
 // The prompt handed to the seller's local agent. Buyer input is untrusted data,
 // so it is fenced and the agent is told not to follow instructions inside it.

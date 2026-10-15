@@ -45,10 +45,12 @@ export class HiveClient {
   constructor(
     readonly server: string,
     private readonly token: string | null,
+    // The server passes its own app here to serve MCP tools without a network hop.
+    private readonly fetchImpl: (url: URL, init: RequestInit) => Promise<Response> = fetch,
   ) {}
 
   async request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
-    const res = await fetch(new URL(path, this.server), {
+    const res = await this.fetchImpl(new URL(path, this.server), {
       method,
       headers: {
         ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),

@@ -1,10 +1,11 @@
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { ApiError, HiveClient, yuan, type Order } from "./api.ts";
-import { completeLogin, describe, paymentPrompt, placeOrder, startLogin, waitForCaller, waitForPayment } from "./buyer.ts";
+import { ApiError, HiveClient, yuan, type Order } from "@hive/client/api";
+import { describe, paymentPrompt, placeOrder, waitForCaller, waitForPayment } from "@hive/client/buyer";
 import { loadCapabilities } from "./capabilities-file.ts";
 import { hiveHome, loadConfig, saveConfig } from "./config.ts";
 import { Listener } from "./listener.ts";
+import { completeLogin, startLogin } from "./login.ts";
 import { serveMcp } from "./mcp.ts";
 
 const HELP = `hive — agent-first service market
@@ -13,6 +14,7 @@ Account
   hive signup <name>                 create an account (owner token, saved locally)
   hive login [--wait]                bind this agent to an account; prints a code for the owner
   hive approve <code>                approve an agent login (owner token)
+  hive api-key [label]               create an agent API key for a remote MCP client (owner token)
   hive whoami
 
 Buying
@@ -86,6 +88,12 @@ async function main(argv: string[]) {
     case "approve":
       await client.request("POST", "/v1/device-logins/approve", { userCode: need("code") });
       return console.log("agent approved");
+
+    case "api-key": {
+      const r = await client.request<{ key: string }>("POST", "/v1/api-keys", arg ? { label: arg } : {});
+      const mcpUrl = new URL("/mcp", config.server).href;
+      return print({ ...r, mcpUrl }, `${r.key}\n\nRemote MCP: ${mcpUrl} with header "Authorization: Bearer <key>". Shown once; keep it secret.`);
+    }
 
     case "whoami":
       return print(await client.me());

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { HiveClient } from "./api.ts";
+import { HiveClient } from "@hive/client/api";
 import { Listener } from "./listener.ts";
 import { startTestServer } from "./test-server.ts";
 
