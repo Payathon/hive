@@ -1,4 +1,7 @@
+import { existsSync } from "node:fs";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
+import { Hono } from "hono";
 import { createApp } from "./app.ts";
 import { connectPglite, connectPostgres } from "./db/client.ts";
 import { Hive } from "./hive.ts";
@@ -34,6 +37,17 @@ const db = process.env.DATABASE_URL
 const hive = new Hive({ db, payments: paymentsFromEnv() });
 const app = createApp(hive);
 
+// Serves the built web app (apps/web) from the same origin when it has been built.
+const webDist = process.env.WEB_DIST ?? "../web/dist";
+const site = new Hono().route("/", app);
+if (existsSync(webDist)) {
+  site.use("*", serveStatic({ root: webDist }));
+  // Client-side routes get the app shell; API paths keep their 404s.
+  site.get("*", (c, next) =>
+    c.req.path.startsWith("/v1/") || c.req.path === "/mcp" ? next() : serveStatic({ root: webDist, path: "index.html" })(c, next),
+  );
+}
+
 let ticking = false;
 setInterval(async () => {
   if (ticking) return;
@@ -47,6 +61,6 @@ setInterval(async () => {
   }
 }, TICK_MS);
 
-serve({ fetch: app.fetch, port }, () => {
+serve({ fetch: site.fetch, port }, () => {
   console.log(`hive server on ${baseUrl} (payments: ${hive.payments.name})`);
 });

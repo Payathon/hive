@@ -1,0 +1,218 @@
+import { capabilityTypes } from "@hive/core";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router";
+import { ApiError, hive, type Listing, type OrderSummary } from "../api.ts";
+import { mmss, STATUS_LABEL, typeTitle, yuan } from "../format.ts";
+import { AgentIcon, TabBar, TypeTile, useAction, useNow, usePoll, useSession, useToast } from "../ui.tsx";
+
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => (clearTimeout(t), resolve()), { once: true });
+  });
+
+function offerWhere(o: OrderSummary) {
+  const i = (o.input ?? {}) as Record<string, unknown>;
+  if (o.capabilityType === "photo.onsite") return `${i.location} · 拍 ${i.count} 张${i.subject}`;
+  if (o.capabilityType === "market-data.competitors") return `${i.city} ${(i.areas as string[]).join("、")} · ${i.category}`;
+  return String(i.title ?? "");
+}
+
+// Long-polls like `hive serve` does, which also keeps this seller online. Only while the page is open.
+function useInbox(online: boolean) {
+  const [inbox, setInbox] = useState<{ offers: OrderSummary[]; work: OrderSummary[] }>({ offers: [], work: [] });
+  useEffect(() => {
+    if (!online) return;
+    const ctl = new AbortController();
+    (async () => {
+      while (!ctl.signal.aborted) {
+        try {
+          const r = await hive.poll(20, ctl.signal);
+          setInbox(r);
+          // The poll returns at once while anything is pending; don't spin on it.
+          if (r.offers.length || r.work.length) await sleep(3000, ctl.signal);
+        } catch {
+          await sleep(3000, ctl.signal);
+        }
+      }
+    })();
+    return () => ctl.abort();
+  }, [online]);
+  return online ? inbox : { offers: [], work: [] };
+}
+
+function OfferSheet({ offer, priceFen, onGrab, onSkip, busy }: { offer: OrderSummary; priceFen: number | null; onGrab: () => void; onSkip: () => void; busy: boolean }) {
+  const now = useNow(500);
+  const total = 3 * 60_000;
+  const left = offer.deadline ? new Date(offer.deadline).getTime() - now : 0;
+  const L = 2 * Math.PI * 26;
+  return (
+    <div className="sheet-bg">
+      <div className="sheet" role="dialog" aria-label="新派单">
+        <div className="sheet-hd"><b>新派单 · 同时派给几位卖家，先抢先得</b></div>
+        <div className="offer">
+          <div className="tx">
+            <div className="nm">{typeTitle(offer.capabilityType)}</div>
+            <div className="where">{offerWhere(offer)}</div>
+            <div className="amt tnum"><small>¥</small>{yuan(priceFen)}</div>
+          </div>
+          <svg width="64" height="64" viewBox="0 0 64 64" aria-label={`剩余 ${mmss(left)}`}>
+            <circle cx="32" cy="32" r="26" fill="none" stroke="#f0f0f0" strokeWidth="5" />
+            <circle cx="32" cy="32" r="26" fill="none" stroke={left < 30_000 ? "#ff4d2d" : "#1677ff"} strokeWidth="5" strokeLinecap="round"
+              strokeDasharray={L} strokeDashoffset={L * (1 - Math.max(0, left) / total)} transform="rotate(-90 32 32)" />
+            <text x="32" y="37" textAnchor="middle" fontSize="13" fontWeight="600" fill="#1a1a1a">{mmss(left)}</text>
+          </svg>
+        </div>
+        {offer.createdByActor === "agent" && (
+          <div className="inline-note"><AgentIcon small />这单由买家的 agent 发起，付款由买家本人确认</div>
+        )}
+        <button className="btn" type="button" disabled={busy} onClick={onGrab}>抢单</button>
+        <button className="link" type="button" disabled={busy} onClick={onSkip}>不接这单</button>
+      </div>
+    </div>
+  );
+}
+
+function Listings({ listings, reload }: { listings: Listing[] | null; reload: () => Promise<void> }) {
+  const { busy, run } = useAction();
+  const toast = useToast();
+  const listed = new Set(listings?.map((l) => l.capabilityType));
+  const unlisted = Object.keys(capabilityTypes).filter((t) => !listed.has(t));
+  const [type, setType] = useState("");
+  const [limit, setLimit] = useState("5");
+
+  async function setup(t: string) {
+    const r = await run(() => hive.paymentSetup(t));
+    if (!r) return;
+    if (r.status === "ENABLED") toast(`已开通收款，标价 ¥${yuan(r.priceFen)}`);
+    else if (r.configurationUrl) window.open(r.configurationUrl, "_blank", "noopener");
+    await reload();
+  }
+  async function add(e: React.FormEvent) {
+    e.preventDefault();
+    const t = type || unlisted[0];
+    if (!t) return;
+    if (!(await run(() => hive.upsertListing(t, Number(limit))))) return;
+    await setup(t);
+    setType("");
+  }
+
+  return (
+    <div className="card">
+      <h4><span>我能接的能力</span><small>价格在支付宝收款页里设置</small></h4>
+      {listings?.map((l) => (
+        <div className="list-row" key={l.id}>
+          <TypeTile type={l.capabilityType} size={32} />
+          <div className="tx">
+            <b>{typeTitle(l.capabilityType)}</b>
+            {l.acceptMode === "auto" && <span className="tag">agent 接单</span>}
+            <small>每天最多 {l.dailyLimit} 单</small>
+          </div>
+          <div className="r">
+            {l.paymentStatus === "ENABLED" ? (
+              <b className="tnum">¥{yuan(l.priceFen)}</b>
+            ) : (
+              <button className="btn sm" type="button" disabled={busy} onClick={() => setup(l.capabilityType)}>设置收款</button>
+            )}
+          </div>
+        </div>
+      ))}
+      {unlisted.length > 0 && (
+        <form className="list-row" onSubmit={add} style={{ flexWrap: "wrap" }}>
+          <select aria-label="能力" value={type || unlisted[0]} onChange={(e) => setType(e.target.value)} style={{ flex: 1, minWidth: 0, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }}>
+            {unlisted.map((t) => <option key={t} value={t}>{typeTitle(t)}</option>)}
+          </select>
+          <input aria-label="每天上限" type="number" min={1} max={100} value={limit} onChange={(e) => setLimit(e.target.value)} style={{ width: 64, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }} />
+          <button className="btn sm" type="submit" disabled={busy}>上架</button>
+        </form>
+      )}
+    </div>
+  );
+}
+
+export function Desk() {
+  const { me, refresh } = useSession();
+  const navigate = useNavigate();
+  const toast = useToast();
+  const { busy, run } = useAction();
+  const [online, setOnline] = useState(me.humanAccepting);
+  const [since] = useState(() => Date.now());
+  const now = useNow(30_000);
+  const inbox = useInbox(online);
+  const [skipped, setSkipped] = useState<Set<string>>(new Set());
+  const offer = inbox.offers.find((o) => !skipped.has(o.id));
+  const { data: bill } = usePoll(() => hive.bill(), 15_000);
+  const { data: listings, reload: reloadListings } = usePoll(() => hive.listings(), 0);
+  const canAccept = listings?.some((l) => l.acceptMode === "ask" && l.paymentStatus === "ENABLED") ?? false;
+
+  // Buzz once per new offer.
+  const seen = useRef<string | null>(null);
+  useEffect(() => {
+    if (offer && seen.current !== offer.id) {
+      seen.current = offer.id;
+      navigator.vibrate?.([200, 100, 200]);
+    }
+  }, [offer]);
+
+  const today = new Date().toDateString();
+  const earnedToday = bill?.earned.filter((e) => e.paidAt && new Date(e.paidAt).toDateString() === today) ?? [];
+
+  async function toggle() {
+    const next = !online;
+    if (!(await run(() => hive.setAccepting(next)))) return;
+    setOnline(next);
+    void refresh();
+  }
+  async function grab(o: OrderSummary) {
+    try {
+      await hive.action(o.id, "accept-offer");
+      navigate(`/orders/${o.id}`);
+    } catch (err) {
+      toast(err instanceof ApiError && err.status === 409 ? "慢了一步，这单已经被别人接了" : String((err as Error).message));
+      setSkipped(new Set(skipped).add(o.id));
+    }
+  }
+  async function skip(o: OrderSummary) {
+    setSkipped(new Set(skipped).add(o.id));
+    await run(() => hive.action(o.id, "decline-offer"));
+  }
+
+  const minutes = Math.floor((now - since) / 60_000);
+  return (
+    <>
+      <div className="page">
+        <div className="desk-head" style={{ paddingTop: "calc(16px + env(safe-area-inset-top, 0px))" }}>
+          <button className={`desk-toggle${online ? " on" : ""}`} type="button" onClick={toggle} disabled={busy || (!online && !canAccept)}>
+            <span>{online ? "接单中" : "开始接单"}<small>{online ? `已在线 ${minutes} 分钟` : "像出车一样上线"}</small></span>
+          </button>
+          <div className="desk-state">
+            {!canAccept ? "先在下面上架一个能力并设置收款" : online ? <><b>正在听单</b> · 保持这个页面打开，有派单会弹出来</> : "停止接单时不会收到派单"}
+          </div>
+        </div>
+
+        <div className="card stats">
+          <div><b className="tnum">{yuan(earnedToday.reduce((n, e) => n + (e.priceFen ?? 0), 0))}</b><span>今日收入（元）</span></div>
+          <div><b className="tnum">{earnedToday.length}</b><span>今日成交</span></div>
+          <div><b className="tnum">{yuan(bill?.earnedFen ?? 0)}</b><span>累计收入（元）</span></div>
+        </div>
+
+        {inbox.work.length > 0 && (
+          <div className="card">
+            <h4>进行中</h4>
+            {inbox.work.map((o) => (
+              <Link className="list-row" key={o.id} to={`/orders/${o.id}`}>
+                <TypeTile type={o.capabilityType} size={32} />
+                <div className="tx"><b>{typeTitle(o.capabilityType)}</b><small>{offerWhere(o)}</small></div>
+                <div className="r"><b className="tnum">¥{yuan(o.priceFen)}</b><small className="tone-go">{o.status === "PAID" ? "可以开始了" : STATUS_LABEL[o.status]}</small></div>
+              </Link>
+            ))}
+          </div>
+        )}
+
+        <Listings listings={listings} reload={reloadListings} />
+      </div>
+      <TabBar />
+      {offer && <OfferSheet offer={offer} priceFen={listings?.find((l) => l.capabilityType === offer.capabilityType)?.priceFen ?? null} busy={busy} onGrab={() => grab(offer)} onSkip={() => skip(offer)} />}
+    </>
+  );
+}

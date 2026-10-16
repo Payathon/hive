@@ -152,22 +152,24 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务的安卓可靠，所以只作辅助；demo 用 iPhone。**[待定]** 正式上线用短信 / 微信小程序订阅消息覆盖安卓。不做邮件。
 
-## 7. 网页页面（草稿）
+## 7. 网页（`apps/web`）
 
-- 市场：能力目录、各能力的卖家与价格
-- 我的订单：买入 / 卖出，订单详情（含"由 agent 发起"标记）
-- 接单台：开始/停止接单，实时派单提醒，抢单
-- 能力上架：选能力类型、规则，引导完成即刻收托管配置（在那里定价）
-- 账单
-- 消息中心
-- 设置：单笔上限、每日上限、一键暂停、已授权的 agent
-- agent 授权页（`hive login` 跳转）
+移动端优先的 PWA，风格为支付宝账单式（支付宝蓝、"由你的 agent 发起"横条、界面用"agent"一词），选型过程见 `docs/design-lab.md`。底部四个标签：
+
+- **市场**：能力目录，展开看各卖家的价格、在线状态、通过率；待付款提醒；人直接下单
+- **订单**：我买的 / 我卖的；订单详情页按状态显示大金额、时间线、交付内容和操作（付款、确认收货、开始干活、交付）
+- **接单**：圆形开关上线听单（页面长轮询 `/v1/seller/poll`，同时充当心跳），派单从底部弹出带倒计时，抢单；上架能力并开通收款
+- **我的**：账单、给 agent 的规矩（单笔/每日上限、暂停）、绑定 agent（`hive login` 的验证码）、生成 API key
+
+登录：网页注册只要名字，返回的 owner token 存在浏览器里；也可以粘贴 CLI 的 owner token。**[待定]** 换成支付宝登录。
+
+还没做：消息中心与 Web Push、拍照直接上传（目前交付贴图片链接）、深色模式。
 
 ## 8. 技术栈
 
 全栈 TypeScript：
 
-- **服务端**：Hono + `@hono/node-server`（`apps/server`）。本期不做前端，长轮询和后台定时任务放在常驻 Node 进程里，比 serverless 更合适；以后的网页前端单独做，调用同一套 API
+- **服务端**：Hono + `@hono/node-server`（`apps/server`）。长轮询和后台定时任务放在常驻 Node 进程里，比 serverless 更合适。构建好的网页（`apps/web/dist`）由同一个进程托管
 - **测试**：Vitest；数据库用进程内的 PGlite，支付用 `FakePaymentProvider`，时钟可注入
 - **Postgres** + Drizzle（本地 `docker compose up`；不设 `DATABASE_URL` 时用 PGlite）
 - **Zod** 定义能力类型 schema 与订单结构，网页 / 服务端 / CLI 共用

@@ -9,6 +9,7 @@ agent 为一等公民的服务市场：agent 找服务、下单、验收，人�
 | `packages/core` | 领域模型：金额（分）、能力类型 schema、订单状态机、派单排序。纯函数，无 IO |
 | `apps/server` | API 服务（Hono + Drizzle/Postgres）、即刻收支付适配、后台定时任务 |
 | `packages/client` | HTTP 客户端、买家流程和 MCP 工具定义，CLI 与服务端 `/mcp` 共用 |
+| `apps/web` | 网页（React + Vite，移动端 PWA）：市场、订单、接单台、我的。风格选型见 [docs/design-lab.md](docs/design-lab.md) |
 | `packages/cli` | `hive` 命令行：买家命令、`hive serve` 接单器、`hive mcp` 本地 MCP；`skill/hive/SKILL.md` 给 agent 用 |
 | `seed` | demo 用的种子卖家（竞品数据、对比图表） |
 
@@ -20,6 +21,11 @@ pnpm install
 # 服务端。不设 DATABASE_URL 时用进程内 PGlite（数据在 apps/server/.data）
 cd apps/server && pnpm dev
 # 或用 Postgres：docker compose up -d && DATABASE_URL=postgres://hive:hive@localhost:54329/hive pnpm dev
+
+# 网页。开发时 Vite 把 /v1 代理到 8787，同一 Wi-Fi 下手机可直接打开它打印的局域网地址
+cd apps/web && pnpm dev
+# 构建后由服务端直接托管（apps/web/dist），访问 http://localhost:8787
+cd apps/web && pnpm build
 
 # CLI
 cd packages/cli && pnpm build   # 产出 dist/hive.mjs
