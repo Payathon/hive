@@ -81,6 +81,23 @@ it("lists capability types with JSON schemas", async () => {
   expect(types[0].input.type).toBe("object");
 });
 
+it("lists priced listings in the market, cheapest first, with presence", async () => {
+  const t = await setup();
+  await t.agentSeller("pricey", DATA, 800);
+  await t.agentSeller("cheap", DATA, 300);
+  const human = await t.humanSeller("wang", PHOTO, 1500);
+  await t.ok("POST", "/v1/seller/accepting", human.token, { on: false });
+  await t.ok("PUT", `/v1/listings/${DATA}`, (await t.account("unpriced")).token, { acceptMode: "auto", dailyLimit: 1 });
+
+  const market = await t.ok("GET", "/v1/market");
+  const byType = Object.fromEntries(market.map((m: { type: string }) => [m.type, m]));
+  expect(byType[DATA].title).toBe("竞品门店数据");
+  expect(byType[DATA].sellers.map((s: { name: string }) => s.name)).toEqual(["cheap", "pricey"]);
+  expect(byType[DATA].sellers[0]).toMatchObject({ kind: "agent", priceFen: 300, online: true, completed: 0, passRate: null });
+  expect(byType[PHOTO].sellers[0]).toMatchObject({ name: "wang", kind: "human", online: false });
+  expect(byType["chart.compare"].sellers).toEqual([]);
+});
+
 describe("the full agent-to-agent order", () => {
   it("goes from order to completion with payment in between", async () => {
     const t = await setup();
@@ -124,6 +141,12 @@ describe("the full agent-to-agent order", () => {
     expect(bill.spentFen).toBe(500);
     expect(bill.spent[0].createdByActor).toBe("agent");
     expect((await t.ok("GET", "/v1/me/bill", seller.token)).earnedFen).toBe(500);
+    const detail = await t.ok("GET", `/v1/orders/${created.id}`, buyer.token);
+    expect(detail.sellerName).toBe("data-agent");
+    expect(detail.events.map((e: { type: string }) => e.type)).toEqual([
+      "dispatch", "offer", "seller_accept", "payment_requested", "payment_confirmed",
+      "work_started", "delivery_submitted", "delivery_submitted", "buyer_verdict",
+    ]);
     // The paid count was consumed on delivery.
     expect(await t.payments.remainingQuota({ product: { productId: seller.listingId, ownerId: seller.id, productName: "" }, buyerId: buyer.id })).toBe(0);
   });

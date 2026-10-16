@@ -48,7 +48,9 @@ export function createApp(hive: Hive) {
     ),
   );
 
-  // Sign-up stays API-only until there is a web front end.
+  app.get("/v1/market", async (c) => c.json(await hive.market()));
+
+  // Sign-up takes only a name; the token it returns is the owner's login.
   app.post("/v1/accounts", async (c) => {
     const { name } = await body(c, z.object({ name: z.string().min(1).max(64) }));
     return c.json(await hive.createAccount(name), 201);
@@ -171,7 +173,7 @@ export function createApp(hive: Hive) {
     return c.json(await hive.listOrders(me(c), role));
   });
 
-  authed.get("/orders/:id", async (c) => c.json(await hive.getOrder(me(c), c.req.param("id"))));
+  authed.get("/orders/:id", async (c) => c.json(await hive.orderDetail(me(c), c.req.param("id"))));
   authed.post("/orders/:id/cancel", async (c) => c.json(await hive.cancelOrder(me(c), c.req.param("id"))));
   authed.post("/orders/:id/check-payment", async (c) => c.json(await hive.checkPayment(me(c), c.req.param("id"))));
   authed.post("/orders/:id/accept-offer", async (c) => c.json(await hive.acceptOffer(me(c), c.req.param("id"))));

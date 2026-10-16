@@ -17,7 +17,7 @@ import {
   type OrderEvent,
 } from "@hive/core";
 import type { Db } from "./db/client.ts";
-import { accounts, deviceLogins, listings, notifications, orders, tokens } from "./db/schema.ts";
+import { accounts, deviceLogins, listings, notifications, orderEvents, orders, tokens } from "./db/schema.ts";
 import { lockOrder, orderColumns, rowToOrder, saveTransition, type OrderRow } from "./orders-repo.ts";
 import type { PaymentProvider, ProductRef } from "./payments/provider.ts";
 
@@ -392,6 +392,52 @@ export class Hive {
     return publicOrder(row);
   }
 
+  // One order with what the order page shows: the seller's name and the applied transitions.
+  async orderDetail(p: Principal, orderId: string) {
+    const order = await this.getOrder(p, orderId);
+    const [seller] = order.sellerAccountId
+      ? await this.db.select({ name: accounts.name }).from(accounts).where(eq(accounts.id, order.sellerAccountId))
+      : [];
+    const events = await this.db
+      .select({ type: orderEvents.type, at: orderEvents.at })
+      .from(orderEvents)
+      .where(eq(orderEvents.orderId, orderId))
+      .orderBy(orderEvents.id);
+    return { ...order, sellerName: seller?.name ?? null, events };
+  }
+
+  // Public catalog: every capability type with its sellable listings, cheapest and most reliable first.
+  async market() {
+    const fresh = new Date(this.now().getTime() - PRESENCE_TTL_MS);
+    const today = startOfShanghaiDay(this.now());
+    const rows = await this.db
+      .select({ listing: listings, account: accounts })
+      .from(listings)
+      .innerJoin(accounts, eq(accounts.id, listings.sellerAccountId))
+      .where(and(eq(listings.active, true), eq(listings.paymentStatus, "ENABLED")));
+    const sellers = new Map<string, Array<Record<string, unknown> & { priceFen: number; passRate: number | null }>>();
+    for (const { listing, account } of rows) {
+      if (listing.priceFen === null) continue;
+      const stats = await this.sellerStats(listing.sellerAccountId, listing.capabilityType, today);
+      const list = sellers.get(listing.capabilityType) ?? [];
+      list.push({
+        name: account.name,
+        kind: listing.acceptMode === "auto" ? "agent" : "human",
+        priceFen: listing.priceFen,
+        online: isOnline(listing, account, fresh),
+        passRate: stats.passRate,
+        completed: stats.completed,
+      });
+      sellers.set(listing.capabilityType, list);
+    }
+    return Object.entries(capabilityTypes).map(([type, t]) => ({
+      type,
+      title: t.title,
+      workTimeoutMs: t.workTimeoutMs,
+      sellers: (sellers.get(type) ?? []).sort((a, b) => a.priceFen - b.priceFen || (b.passRate ?? 1) - (a.passRate ?? 1)),
+    }));
+  }
+
   async listOrders(p: Principal, role: "buyer" | "seller") {
     const col = role === "buyer" ? orders.buyerAccountId : orders.sellerAccountId;
     const rows = await this.db.select().from(orders).where(eq(col, p.accountId)).orderBy(desc(orders.createdAt)).limit(100);
@@ -544,10 +590,7 @@ export class Hive {
     const out: Listing[] = [];
     for (const { listing, account } of rows) {
       if (listing.priceFen === null) continue;
-      const online =
-        listing.acceptMode === "auto"
-          ? (account.listenerSeenAt ?? new Date(0)) > fresh
-          : account.humanAccepting && (account.humanSeenAt ?? new Date(0)) > fresh;
+      const online = isOnline(listing, account, fresh);
       const stats = await this.sellerStats(listing.sellerAccountId, type, today);
       out.push({
         sellerAccountId: listing.sellerAccountId,
@@ -584,7 +627,7 @@ export class Hive {
       .where(and(eq(orders.sellerAccountId, sellerAccountId), eq(orders.status, "COMPLETED")))) as [
       { total: number; passed: number },
     ];
-    return { ordersToday: today_.n, passRate: rate.total ? rate.passed / rate.total : null };
+    return { ordersToday: today_.n, completed: rate.total, passRate: rate.total ? rate.passed / rate.total : null };
   }
 
   // Leftover credit (e.g. from an earlier rejected purchase) pays immediately; otherwise create a purchase.
@@ -670,6 +713,13 @@ export class Hive {
         break;
     }
   }
+}
+
+// Agent sellers are online while `hive serve` polls; human sellers while they keep the 接单台 open.
+function isOnline(listing: typeof listings.$inferSelect, account: typeof accounts.$inferSelect, fresh: Date) {
+  return listing.acceptMode === "auto"
+    ? (account.listenerSeenAt ?? new Date(0)) > fresh
+    : account.humanAccepting && (account.humanSeenAt ?? new Date(0)) > fresh;
 }
 
 // Order as exposed over the API.
