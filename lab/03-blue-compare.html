@@ -1,0 +1,303 @@
+<title>hive 订单页三选一</title>
+<style>
+/* Layout: lab shell (theme-aware) around three fixed-palette phones of the same order: 闲鱼式, iOS 式, 支付宝账单式, all in Alipay blue. */
+:root {
+  --bg: #f3f3f1; --panel: #ffffff; --fg: #1c1c1a; --muted: #6b6b66; --line: #deddd8; --chip: #e9e8e4; --accent: #2f5bd3; --frame: #1c1c1a;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #171716; --panel: #212120; --fg: #ecebe6; --muted: #9c9b95; --line: #343431; --chip: #2c2c2a; --accent: #7d9cf0; --frame: #3a3a37; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #171716; --panel: #212120; --fg: #ecebe6; --muted: #9c9b95; --line: #343431; --chip: #2c2c2a; --accent: #7d9cf0; --frame: #3a3a37; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); }
+button { font: inherit; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { padding-inline: 16px; padding-block: 24px 48px; max-width: 1280px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.lab-head h1 { margin: 0; font-size: 22px; text-wrap: balance; }
+.lab-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 70ch; line-height: 1.6; }
+.bar-row { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; background: var(--chip); padding: 3px; border-radius: 10px; }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 6px 10px; border-radius: 7px; font-size: 13px; }
+.seg button.on { background: var(--panel); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.ctl { border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 7px 12px; border-radius: 8px; font-size: 13px; }
+.ctl.on { border-color: var(--accent); color: var(--accent); }
+.tabs { display: none; }
+.frames { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 24px; }
+.spec { display: flex; flex-direction: column; gap: 10px; min-width: 0; align-items: center; }
+.spec-meta { width: 100%; max-width: 375px; }
+.spec-meta b { font-size: 14px; }
+.spec-meta p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.phone { width: 100%; max-width: 375px; height: 760px; border: 9px solid var(--frame); border-radius: 46px; overflow: hidden; background: #fff; }
+.screen { height: 100%; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
+.screen::-webkit-scrollbar { display: none; }
+.screen > div { flex: 1 0 auto; display: flex; flex-direction: column; }
+@media (max-width: 1180px) { .frames { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 820px) {
+  .tabs { display: flex; }
+  .frames { grid-template-columns: 1fr; }
+  .spec:not(.focus) { display: none; }
+  .phone { height: 78svh; max-width: 430px; border-width: 6px; border-radius: 30px; }
+}
+.tnum { font-variant-numeric: tabular-nums; }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* shared inside phones */
+.ph { --blue: #1677ff; --blue-soft: #e8f1ff; --ink: #1a1a1a; --sub: #8c8c8c; --red: #ff4d2d; --ok: #00b578; }
+.agent-ic { width: 28px; height: 28px; border-radius: 50%; background: var(--blue); flex: none; display: grid; place-items: center; }
+
+/* ===== A · 闲鱼式（蓝） ===== */
+.sA { background: #f4f4f4; color: var(--ink); font-size: 14px; }
+.a-top { background: linear-gradient(180deg, var(--blue) 0%, #69a7ff 70%, #f4f4f4 100%); color: #fff; padding: 14px 16px 34px; }
+.a-nav { display: flex; justify-content: space-between; font-size: 16px; }
+.a-big { font-size: 24px; font-weight: 700; margin-top: 22px; }
+.a-sub { font-size: 13px; margin-top: 4px; color: #e6f0ff; }
+.a-body { padding: 0 12px 12px; margin-top: -22px; display: flex; flex-direction: column; gap: 10px; }
+.a-card { background: #fff; border-radius: 12px; padding: 14px; }
+.a-agent { display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.a-agent small { display: block; color: var(--sub); font-size: 12px; margin-top: 1px; }
+.a-prog { display: grid; grid-template-columns: repeat(7, 1fr); position: relative; }
+.a-prog::before { content: ""; position: absolute; left: 7%; right: 7%; top: 6px; height: 2px; background: #eee; }
+.a-prog .bar { position: absolute; left: 7%; top: 6px; height: 2px; background: var(--blue); transition: width .4s ease; }
+.a-step { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--sub); }
+.a-step i { width: 14px; height: 14px; border-radius: 50%; background: #e3e3e3; border: 3px solid #fff; box-shadow: 0 0 0 1px #e3e3e3; }
+.a-step.done i { background: var(--blue); box-shadow: 0 0 0 1px var(--blue); }
+.a-step.now { color: var(--ink); font-weight: 600; }
+.a-step.now i { background: #fff; box-shadow: 0 0 0 2px var(--blue); }
+.a-item { display: flex; gap: 12px; }
+.a-thumb { width: 72px; height: 72px; border-radius: 8px; flex: none; background: var(--blue-soft); color: #0b57c9; display: grid; place-items: center; font-weight: 700; font-size: 13px; text-align: center; line-height: 1.3; }
+.a-item h3 { margin: 0; font-size: 15px; }
+.a-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.a-chips span { background: #f5f5f5; border-radius: 4px; padding: 2px 6px; font-size: 12px; color: #595959; }
+.a-price { margin-left: auto; color: var(--red); font-weight: 700; font-size: 18px; align-self: flex-start; }
+.a-price small { font-size: 12px; }
+.a-seller { display: flex; align-items: center; gap: 10px; }
+.a-ava { width: 40px; height: 40px; border-radius: 50%; background: var(--blue); color: #fff; display: grid; place-items: center; font-weight: 700; flex: none; }
+.a-seller .nm { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.a-tag { font-size: 10px; font-weight: 600; background: var(--blue); color: #fff; padding: 1px 5px; border-radius: 3px; }
+.a-seller small { color: var(--sub); font-size: 12px; }
+.a-seller .go { margin-left: auto; color: var(--sub); }
+.a-meta { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px; margin: 0; }
+.a-meta dt { color: var(--sub); } .a-meta dd { margin: 0; text-align: right; }
+.a-deliv h4 { margin: 0 0 8px; font-size: 14px; display: flex; justify-content: space-between; }
+.a-deliv h4 span { color: var(--ok); font-size: 12px; font-weight: 500; }
+.a-row { display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid #f2f2f2; font-size: 13px; }
+.a-row em { font-style: normal; color: var(--sub); }
+.a-bar { position: sticky; bottom: 0; margin-top: auto; background: #fff; padding: 10px 14px 18px; display: flex; gap: 10px; justify-content: flex-end; align-items: center; box-shadow: 0 -1px 0 #eee; }
+.a-bar .tip { margin-right: auto; font-size: 12px; color: var(--sub); }
+.a-btn { border: 1px solid #d9d9d9; background: #fff; border-radius: 20px; padding: 9px 16px; font-size: 14px; color: var(--ink); }
+.a-btn.pri { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; padding-inline: 20px; }
+
+/* ===== C · iOS 式（蓝） ===== */
+.sC { background: #f2f2f7; color: #000; font-size: 15px; letter-spacing: -0.01em; }
+.c-nav { padding: 12px 16px 0; color: var(--blue); font-size: 17px; display: flex; justify-content: space-between; }
+.c-large { font-size: 30px; font-weight: 700; padding: 6px 16px 0; letter-spacing: -0.02em; }
+.c-hero { margin: 14px 16px 0; background: #fff; border-radius: 14px; padding: 16px; display: flex; gap: 14px; align-items: center; }
+.c-hero svg { flex: none; }
+.c-hero .ring { transition: stroke-dashoffset .6s cubic-bezier(.2,.9,.3,1.2); }
+.c-hero b { font-size: 19px; display: block; }
+.c-hero span { color: #8a8a8e; font-size: 13px; }
+.c-banner { margin: 10px 16px 0; background: var(--blue-soft); border-radius: 12px; padding: 10px 12px; display: flex; gap: 10px; align-items: center; font-size: 13px; color: #0b57c9; }
+.c-lab { padding: 22px 32px 6px; font-size: 13px; color: #8a8a8e; }
+.c-group { margin: 0 16px; background: #fff; border-radius: 12px; overflow: hidden; }
+.c-cell { display: flex; align-items: center; gap: 12px; padding: 11px 16px; min-height: 44px; position: relative; }
+.c-cell + .c-cell::before { content: ""; position: absolute; top: 0; left: 52px; right: 0; height: 1px; background: #e1e1e6; }
+.c-group.plain .c-cell + .c-cell::before { left: 16px; }
+.c-cell .r { margin-left: auto; color: #8a8a8e; }
+.c-ic { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.c-ic.done { background: var(--blue); }
+.c-ic.now { border: 2px solid var(--blue); }
+.c-ic.now::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--blue); animation: pulse 1.2s infinite; }
+.c-ic.todo { border: 2px solid #e1e1e6; }
+.c-cell.todo .lb { color: #8a8a8e; }
+.c-ava { width: 36px; height: 36px; border-radius: 9px; background: var(--blue); color: #fff; display: grid; place-items: center; font-weight: 600; flex: none; }
+.c-cell small { display: block; color: #8a8a8e; font-size: 13px; }
+.c-sheet { position: sticky; bottom: 0; margin-top: auto; padding: 12px 16px 22px; background: rgba(242,242,247,.8); backdrop-filter: blur(18px) saturate(1.8); -webkit-backdrop-filter: blur(18px) saturate(1.8); display: flex; flex-direction: column; gap: 6px; border-top: .5px solid rgba(0,0,0,.12); }
+.c-btn { border: 0; border-radius: 14px; padding: 15px; font-size: 17px; font-weight: 600; background: var(--blue); color: #fff; }
+.c-btn.ghost { background: transparent; color: var(--blue); font-weight: 400; padding: 6px; }
+.c-pad { height: 24px; }
+
+/* ===== P · 支付宝账单式 ===== */
+.sP { background: #f5f5f5; color: var(--ink); font-size: 14px; }
+.p-nav { background: #fff; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+.p-nav b { font-weight: 500; font-size: 17px; }
+.p-head { background: #fff; padding: 8px 16px 22px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.p-logo { width: 44px; height: 44px; border-radius: 10px; background: var(--blue-soft); color: #0b57c9; display: grid; place-items: center; font-weight: 700; font-size: 13px; line-height: 1.15; }
+.p-name { font-size: 14px; color: #333; }
+.p-amt { font-size: 34px; font-weight: 600; letter-spacing: -0.01em; }
+.p-st { font-size: 14px; font-weight: 500; }
+.p-st.wait { color: #ff8f1f; } .p-st.go { color: var(--blue); } .p-st.ok { color: var(--sub); }
+.p-st small { display: block; color: var(--sub); font-weight: 400; font-size: 12.5px; margin-top: 3px; }
+.p-banner { margin: 10px 12px 0; background: #fff; border-radius: 10px; padding: 11px 12px; display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.p-banner small { display: block; color: var(--sub); font-size: 12px; margin-top: 1px; }
+.p-card { margin: 10px 12px 0; background: #fff; border-radius: 10px; padding: 14px 14px 4px; }
+.p-card h4 { margin: 0 0 12px; font-size: 14px; font-weight: 500; display: flex; justify-content: space-between; }
+.p-card h4 span { font-weight: 400; color: var(--ok); font-size: 12px; }
+.p-tl { list-style: none; margin: 0; padding: 0; }
+.p-tl li { display: grid; grid-template-columns: 16px 1fr auto; gap: 10px; position: relative; padding-bottom: 14px; font-size: 13.5px; }
+.p-tl li::before { content: ""; position: absolute; left: 7.5px; top: 14px; bottom: 0; width: 1px; background: #e8e8e8; }
+.p-tl li.done::before { background: var(--blue); }
+.p-tl li:last-child::before { display: none; }
+.p-tl .d { width: 9px; height: 9px; border-radius: 50%; margin: 4px 3.5px; background: #d9d9d9; }
+.p-tl li.done .d { background: var(--blue); }
+.p-tl li.now .d { background: #fff; box-shadow: 0 0 0 2.5px var(--blue); animation: pulse 1.2s infinite; }
+.p-tl li.todo { color: #bfbfbf; }
+.p-tl li.now { font-weight: 600; }
+.p-tl small { display: block; color: var(--sub); font-weight: 400; font-size: 12px; margin-top: 2px; }
+.p-tl .t { color: var(--sub); font-size: 12px; font-weight: 400; }
+.p-kv { display: grid; grid-template-columns: auto 1fr; gap: 0 16px; font-size: 13.5px; margin: 0; }
+.p-kv dt, .p-kv dd { padding: 0 0 12px; margin: 0; }
+.p-kv dt { color: var(--sub); }
+.p-kv dd { text-align: right; min-width: 0; }
+.p-tag { font-size: 10px; border: 1px solid var(--blue); color: var(--blue); border-radius: 3px; padding: 0 3px; margin-left: 4px; vertical-align: 1px; }
+.p-row { display: flex; justify-content: space-between; padding: 0 0 10px; font-size: 13.5px; }
+.p-row em { font-style: normal; color: var(--sub); }
+.p-bar { position: sticky; bottom: 0; margin-top: auto; background: #fff; padding: 10px 16px 20px; display: flex; flex-direction: column; gap: 6px; box-shadow: 0 -1px 0 #eee; }
+.p-btn { border: 0; border-radius: 8px; padding: 13px; font-size: 16px; font-weight: 500; background: var(--blue); color: #fff; }
+.p-btn.line { background: #fff; color: var(--ink); border: 1px solid #d9d9d9; }
+.p-link { border: 0; background: transparent; color: var(--sub); font-size: 13px; padding: 4px; }
+.p-pad { height: 24px; }
+</style>
+
+<div class="wrap">
+  <header class="lab-head">
+    <h1>hive 风格实验室 · 第 2.5 轮：订单页三选一</h1>
+    <p>三版都已套上定下的结论：支付宝蓝、“由你的 agent 发起”横条、界面用“agent”。只比骨架：闲鱼式、iOS 式，以及支付宝账单式（两者的混合）。</p>
+  </header>
+  <div class="bar-row"><div class="seg" id="stages"></div><button class="ctl" id="play" type="button">自动演示</button></div>
+  <div class="seg tabs" id="tabs"></div>
+  <main class="frames" id="frames"></main>
+</div>
+
+<script>
+const STAGES = [
+  { short: "下单", t: "14:02", text: "你的 agent 下了单", detail: "杭州 · 奶茶 · 湖滨 / 武林 / 滨江" },
+  { short: "派单", t: "14:02", text: "正在找卖家", detail: "3 位在线卖家，按价格和通过率排序" },
+  { short: "接单", t: "14:02", text: "茶饮数据通 接了单", detail: "agent 卖家 · 自动接单" },
+  { short: "付款", t: "14:02", text: "等你在支付宝确认付款", detail: "15 分钟内有效" },
+  { short: "干活", t: "14:03", text: "卖家正在整理数据", detail: "通常 1 分钟内交付" },
+  { short: "交付", t: "14:03", text: "交付了 12 家门店数据", detail: "已通过格式校验，等你验收" },
+  { short: "完成", t: "14:04", text: "验收通过", detail: "钱已到卖家支付宝" },
+];
+const HEAD = ["已下单", "正在派单", "卖家已接单", "等待付款", "卖家干活中", "已交付", "交易完成"];
+const BRANDS = ["一点点", "喜茶", "茶百道", "古茗", "蜜雪冰城", "霸王茶姬", "沪上阿姨", "奈雪的茶"];
+const AREAS = ["湖滨", "武林", "滨江"];
+const STORES = AREAS.flatMap((area, i) => BRANDS.slice(0, 3 + (i % 3)).map((name, j) => ({
+  name, area, rating: Math.round((4 + ((i + j) % 10) / 10) * 10) / 10, price: 10 + ((i * 7 + j * 5) % 20),
+})));
+const SPECS = [
+  { k: "A", name: "闲鱼式", idea: "第 1 轮的 A 换成蓝色。渐变状态头、横向进度点、圆角按钮。" },
+  { k: "C", name: "iOS 式", idea: "大标题、进度环、竖排进度列表、毛玻璃底栏。" },
+  { k: "P", name: "支付宝账单式", idea: "顶部居中大金额加状态，竖排时间线，左右对齐的明细行，底部通栏蓝按钮。" },
+];
+const S = { i: 3, secs: 900, playing: false, focus: "P" };
+const st = (n) => (S.i === 6 || n < S.i ? "done" : n === S.i ? "now" : "todo");
+const cd = () => `${String(Math.floor(S.secs / 60)).padStart(2, "0")}:${String(S.secs % 60).padStart(2, "0")}`;
+const check = (c = "#fff", s = 12) => `<svg width="${s}" height="${s}" viewBox="0 0 12 12"><path d="M2.5 6.2l2.3 2.3 4.7-5" fill="none" stroke="${c}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const agentIc = `<span class="agent-ic"><svg width="16" height="16" viewBox="0 0 16 16"><rect x="2" y="4" width="12" height="9" rx="3" fill="#fff"/><circle cx="6" cy="8.5" r="1.1" fill="#1677ff"/><circle cx="10" cy="8.5" r="1.1" fill="#1677ff"/><path d="M8 1.5v2.5" stroke="#fff" stroke-width="1.4" stroke-linecap="round"/></svg></span>`;
+const BANNER_T = "由你的 agent「Claude」发起";
+const BANNER_S = "agent 负责下单和验收，每笔付款都要你确认";
+
+function A(i) {
+  const sub = ["正在提交", "正在为你匹配卖家，通常几秒钟", "马上生成付款入口", `剩余 <b class="cd tnum">${cd()}</b>，超时自动取消`, "已付款，付款后不能取消", "卖家已交付，请确认收货", "钱已到卖家支付宝"][i];
+  const bar = [
+    ...Array(3).fill(`<span class="tip">付款前可随时取消</span><button class="a-btn" type="button">取消订单</button>`),
+    `<button class="a-btn" type="button">取消订单</button><button class="a-btn pri" type="button" data-act="pay">去支付宝付款 ¥5.00</button>`,
+    `<span class="tip">卖家正在干活，交付后通知你</span><button class="a-btn" type="button">联系卖家</button>`,
+    `<button class="a-btn" type="button">拒收</button><button class="a-btn pri" type="button" data-act="accept">确认收货</button>`,
+    `<button class="a-btn" type="button">评价</button><button class="a-btn pri" type="button" data-act="again">再来一单</button>`,
+  ][i];
+  return `<div class="ph sA">
+    <div class="a-top"><div class="a-nav"><span>‹</span><b>订单详情</b><span>···</span></div><div class="a-big">${HEAD[i]}</div><div class="a-sub">${sub}</div></div>
+    <div class="a-body">
+      <div class="a-card a-agent">${agentIc}<div>${BANNER_T}<small>${BANNER_S}</small></div></div>
+      <div class="a-card"><div class="a-prog"><div class="bar" style="width:${(Math.min(i, 6) / 6) * 86}%"></div>${STAGES.map((s, n) => `<div class="a-step ${st(n)}"><i></i>${s.short}</div>`).join("")}</div></div>
+      <div class="a-card a-item"><div class="a-thumb">竞品<br>数据</div><div><h3>竞品门店数据</h3><div class="a-chips"><span>杭州</span><span>奶茶</span>${AREAS.map((a) => `<span>${a}</span>`).join("")}</div></div><div class="a-price"><small>¥</small>5.00</div></div>
+      ${i >= 2 ? `<div class="a-card a-seller"><div class="a-ava">茶</div><div><div class="nm">茶饮数据通<span class="a-tag">AGENT</span></div><small>通过率 98% · 已成交 1,243 单</small></div><span class="go">›</span></div>` : ""}
+      ${i >= 5 ? `<div class="a-card a-deliv"><h4>交付内容<span>✓ 格式校验通过</span></h4>${STORES.slice(0, 5).map((s) => `<div class="a-row"><span>${s.name} · ${s.area}</span><em>${s.rating} 分 · 人均 ¥${s.price}</em></div>`).join("")}<div class="a-row"><em>共 ${STORES.length} 家门店</em><em>查看全部 ›</em></div></div>` : ""}
+      <dl class="a-card a-meta"><dt>订单编号</dt><dd class="tnum">H202610150042</dd><dt>下单时间</dt><dd class="tnum">2026-10-15 14:02</dd><dt>付款方式</dt><dd>支付宝 · 钱直接给卖家</dd></dl>
+    </div>
+    <div class="a-bar">${bar}</div></div>`;
+}
+
+function C(i) {
+  const L = 2 * Math.PI * 24, p = Math.min(i, 6) / 6;
+  const sub = ["刚刚", "通常几秒钟", "马上可以付款", `<span class="cd tnum">${cd()}</span> 内付款`, "通常 1 分钟内交付", "请检查后验收", "今天 14:04"][i];
+  const sheet = {
+    3: `<button class="c-btn" type="button" data-act="pay">用支付宝付款 ¥5.00</button><button class="c-btn ghost" type="button">取消订单</button>`,
+    5: `<button class="c-btn" type="button" data-act="accept">验收通过</button><button class="c-btn ghost" type="button">拒绝</button>`,
+    6: `<button class="c-btn" type="button" data-act="again">再来一单</button>`,
+  }[i];
+  return `<div class="ph sC">
+    <div class="c-nav"><span>‹ 订单</span><span>···</span></div>
+    <div class="c-large">竞品门店数据</div>
+    <div class="c-banner">${agentIc}<div>${BANNER_T}</div></div>
+    <div class="c-hero"><svg width="58" height="58" viewBox="0 0 58 58"><circle cx="29" cy="29" r="24" fill="none" stroke="#e5e5ea" stroke-width="6"/><circle class="ring" cx="29" cy="29" r="24" fill="none" stroke="#1677ff" stroke-width="6" stroke-linecap="round" stroke-dasharray="${L}" stroke-dashoffset="${L * (1 - p)}" transform="rotate(-90 29 29)"/><text x="29" y="34" text-anchor="middle" font-size="14" font-weight="600" fill="#000">${i + 1}/7</text></svg><div><b>${HEAD[i]}</b><span>${sub}</span></div></div>
+    <div class="c-lab">进度</div>
+    <div class="c-group">${STAGES.map((s, n) => { const k = st(n); return `<div class="c-cell ${k}"><span class="c-ic ${k}">${k === "done" ? check() : ""}</span><span class="lb">${s.text}</span><span class="r tnum">${k === "todo" ? "" : s.t}</span></div>`; }).join("")}</div>
+    ${i >= 2 ? `<div class="c-lab">卖家</div><div class="c-group"><div class="c-cell"><div class="c-ava">茶</div><div>茶饮数据通<small>agent · 通过率 98%</small></div><span class="r">1,243 单 ›</span></div></div>` : ""}
+    ${i >= 5 ? `<div class="c-lab">交付内容 · ${STORES.length} 家</div><div class="c-group plain">${STORES.slice(0, 4).map((s) => `<div class="c-cell"><div>${s.name}<small>${s.area}</small></div><span class="r tnum">${s.rating} 分</span></div>`).join("")}<div class="c-cell" style="color:#1677ff">查看全部</div></div>` : ""}
+    <div class="c-lab">订单</div>
+    <div class="c-group plain"><div class="c-cell">价格<span class="r tnum">¥5.00</span></div><div class="c-cell">付款方式<span class="r">支付宝</span></div><div class="c-cell">订单编号<span class="r tnum">H202610150042</span></div></div>
+    ${sheet ? `<div class="c-sheet">${sheet}</div>` : `<div class="c-pad"></div>`}</div>`;
+}
+
+function P(i) {
+  const cls = i === 3 ? "wait" : i === 6 ? "ok" : "go";
+  const sub = ["", "通常几秒钟", "马上可以付款", `请在 <span class="cd tnum">${cd()}</span> 内付款，超时自动取消`, "已付款，通常 1 分钟内交付", "请检查交付内容后确认收货", "钱已直接到卖家支付宝"][i];
+  const bar = {
+    3: `<button class="p-btn" type="button" data-act="pay">去支付宝付款</button><button class="p-link" type="button">取消订单</button>`,
+    5: `<button class="p-btn" type="button" data-act="accept">确认收货</button><button class="p-link" type="button">拒收</button>`,
+    6: `<button class="p-btn line" type="button" data-act="again">再来一单</button>`,
+  }[i] ?? (i < 3 ? `<button class="p-link" type="button">取消订单</button>` : "");
+  return `<div class="ph sP">
+    <div class="p-nav"><span>‹</span><b>订单详情</b><span>···</span></div>
+    <div class="p-head"><div class="p-logo">竞品<br>数据</div><div class="p-name">竞品门店数据 · 茶饮数据通</div>
+      <div class="p-amt tnum">${i === 6 ? "-" : ""}5.00</div><div class="p-st ${cls}">${HEAD[i]}${sub ? `<small>${sub}</small>` : ""}</div></div>
+    <div class="p-banner">${agentIc}<div>${BANNER_T}<small>${BANNER_S}</small></div></div>
+    ${i >= 5 ? `<div class="p-card"><h4>交付内容<span>✓ 格式校验通过</span></h4>${STORES.slice(0, 4).map((s) => `<div class="p-row"><span>${s.name} · ${s.area}</span><em>${s.rating} 分 · 人均 ¥${s.price}</em></div>`).join("")}<div class="p-row"><em>共 ${STORES.length} 家门店</em><em style="color:#1677ff">查看全部 ›</em></div></div>` : ""}
+    <div class="p-card"><h4>订单进度</h4><ol class="p-tl">${STAGES.map((s, n) => { const k = st(n); return `<li class="${k}"><span class="d"></span><div>${s.text}${k === "now" ? `<small>${s.detail}</small>` : ""}</div><span class="t tnum">${k === "todo" ? "" : s.t}</span></li>`; }).join("")}</ol></div>
+    <div class="p-card"><dl class="p-kv">
+      <dt>卖家</dt><dd>${i >= 2 ? `茶饮数据通<span class="p-tag">agent</span>` : "派单中"}</dd>
+      <dt>购买内容</dt><dd>杭州 奶茶 · 湖滨 / 武林 / 滨江</dd>
+      <dt>付款方式</dt><dd>支付宝，钱直接给卖家</dd>
+      <dt>订单编号</dt><dd class="tnum">H202610150042</dd>
+      <dt>创建时间</dt><dd class="tnum">2026-10-15 14:02:11</dd></dl></div>
+    ${bar ? `<div class="p-bar">${bar}</div>` : `<div class="p-pad"></div>`}</div>`;
+}
+
+const R = { A, C, P };
+const $ = (s) => document.querySelector(s);
+function build() {
+  $("#stages").innerHTML = STAGES.map((s, n) => `<button type="button" data-stage="${n}">${s.short}</button>`).join("");
+  $("#tabs").innerHTML = SPECS.map((s) => `<button type="button" data-tab="${s.k}">${s.name}</button>`).join("");
+  $("#frames").innerHTML = SPECS.map((s) => `<section class="spec" data-spec="${s.k}"><div class="spec-meta"><b>${s.name}</b><p>${s.idea}</p></div>
+    <div class="phone"><div class="screen" id="scr-${s.k}"></div></div></section>`).join("");
+}
+function render() {
+  for (const k in R) $("#scr-" + k).innerHTML = R[k](S.i);
+  document.querySelectorAll("[data-stage]").forEach((b) => b.classList.toggle("on", +b.dataset.stage === S.i));
+  document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.focus));
+  document.querySelectorAll("[data-spec]").forEach((b) => b.classList.toggle("focus", b.dataset.spec === S.focus));
+  $("#play").classList.toggle("on", S.playing);
+  $("#play").textContent = S.playing ? "演示中…" : "自动演示";
+}
+function go(n) { if (n === 3 && S.i !== 3) S.secs = 900; S.i = n; render(); }
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-act],[data-stage],[data-tab],#play");
+  if (!t) return;
+  if (t.id === "play") { S.playing = !S.playing; if (S.playing && S.i === 6) go(0); else render(); return; }
+  if (t.dataset.stage) { S.playing = false; go(+t.dataset.stage); return; }
+  if (t.dataset.tab) { S.focus = t.dataset.tab; render(); return; }
+  ({ pay: () => go(4), accept: () => go(6), again: () => go(0) })[t.dataset.act]?.();
+});
+setInterval(() => { if (S.i === 3 && S.secs > 0) { S.secs--; document.querySelectorAll(".cd").forEach((el) => (el.textContent = cd())); } }, 1000);
+setInterval(() => {
+  if (!S.playing) return;
+  if ([0, 1, 2, 4].includes(S.i)) go(S.i + 1);
+  else if (S.i === 6) { S.playing = false; render(); }
+}, 1600);
+build();
+render();
+</script>

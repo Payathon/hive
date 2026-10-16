@@ -1,0 +1,447 @@
+<title>hive 风格实验室</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Noto+Serif+SC:wght@600&display=swap">
+<style>
+/* Layout: lab shell (theme-aware) around four fixed-palette phone specimens of the same order screen. */
+:root {
+  --bg: #f3f3f1;
+  --panel: #ffffff;
+  --fg: #1c1c1a;
+  --muted: #6b6b66;
+  --line: #deddd8;
+  --chip: #e9e8e4;
+  --accent: #2f5bd3;
+  --frame: #1c1c1a;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --serif: "Noto Serif SC", "Songti SC", serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171716; --panel: #212120; --fg: #ecebe6; --muted: #9c9b95; --line: #343431;
+    --chip: #2c2c2a; --accent: #7d9cf0; --frame: #3a3a37; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #171716; --panel: #212120; --fg: #ecebe6; --muted: #9c9b95; --line: #343431;
+  --chip: #2c2c2a; --accent: #7d9cf0; --frame: #3a3a37; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); }
+button { font: inherit; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { padding-inline: 16px; padding-block: 24px 48px; max-width: 1640px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px; }
+
+/* ---------- shell ---------- */
+.lab-head { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 24px; }
+.lab-head h1 { margin: 0; font-size: 22px; letter-spacing: -0.01em; text-wrap: balance; }
+.lab-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 60ch; }
+.controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.stages { display: flex; flex-wrap: wrap; gap: 4px; background: var(--chip); padding: 3px; border-radius: 10px; }
+.stages button { border: 0; background: transparent; color: var(--muted); padding: 6px 10px; border-radius: 7px; font-size: 13px; }
+.stages button.on { background: var(--panel); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.ctl { border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 7px 12px; border-radius: 8px; font-size: 13px; }
+.ctl.on { border-color: var(--accent); color: var(--accent); }
+.hint { font-size: 12px; color: var(--muted); }
+.tabs { display: none; gap: 4px; background: var(--chip); padding: 3px; border-radius: 10px; }
+.tabs button { flex: 1; border: 0; background: transparent; color: var(--muted); padding: 7px 0; border-radius: 7px; font-size: 13px; }
+.tabs button.on { background: var(--panel); color: var(--fg); }
+
+.frames { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }
+.spec { display: flex; flex-direction: column; gap: 10px; min-width: 0; align-items: center; }
+.spec-meta { width: 100%; max-width: 375px; }
+.spec-meta b { font-size: 14px; }
+.spec-meta b span { color: var(--muted); font-weight: 500; margin-left: 6px; }
+.spec-meta p { margin: 3px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.phone { width: 100%; max-width: 375px; height: 760px; border: 9px solid var(--frame); border-radius: 46px; overflow: hidden; background: #fff; }
+.screen { height: 100%; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
+.screen::-webkit-scrollbar { display: none; }
+.screen > div { flex: 1 0 auto; display: flex; flex-direction: column; }
+
+.notes { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px 32px; }
+.notes h2 { grid-column: 1 / -1; margin: 0; font-size: 15px; }
+.notes h3 { margin: 0 0 6px; font-size: 13px; }
+.notes ul { margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted); line-height: 1.7; }
+
+@media (max-width: 1500px) { .frames { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 820px) {
+  .tabs { display: flex; }
+  .frames { grid-template-columns: 1fr; }
+  .spec:not(.focus) { display: none; }
+  .phone { height: 78svh; max-width: 430px; border-width: 6px; border-radius: 30px; }
+}
+
+/* shared bits inside specimens */
+.mono { font-family: var(--mono); }
+.tnum { font-variant-numeric: tabular-nums; }
+@keyframes rise { from { opacity: .3; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ========== A · 闲鱼 / 支付宝 ========== */
+.sA { --a-bg: #f4f4f4; --a-card: #fff; --a-ink: #1a1a1a; --a-sub: #8c8c8c; --a-yel: #ffe60f; --a-blue: #1677ff; --a-red: #ff4d2d;
+  background: var(--a-bg); color: var(--a-ink); font-size: 14px; }
+.a-top { background: linear-gradient(180deg, var(--a-yel) 0%, #fff27a 70%, var(--a-bg) 100%); padding: 14px 16px 34px; }
+.a-nav { display: flex; justify-content: space-between; font-size: 16px; }
+.a-nav b { font-weight: 600; }
+.a-big { font-size: 24px; font-weight: 700; margin-top: 22px; }
+.a-sub { font-size: 13px; margin-top: 4px; color: #5a5200; }
+.a-body { padding: 0 12px 12px; margin-top: -22px; display: flex; flex-direction: column; gap: 10px; }
+.a-card { background: var(--a-card); border-radius: 12px; padding: 14px; }
+.a-agent { display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.a-agent svg { flex: none; }
+.a-agent small { display: block; color: var(--a-sub); font-size: 12px; margin-top: 1px; }
+.a-prog { display: grid; grid-template-columns: repeat(7, 1fr); position: relative; }
+.a-prog::before { content: ""; position: absolute; left: 7%; right: 7%; top: 6px; height: 2px; background: #eee; }
+.a-prog .bar { position: absolute; left: 7%; top: 6px; height: 2px; background: var(--a-ink); transition: width .4s ease; }
+.a-step { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--a-sub); }
+.a-step i { width: 14px; height: 14px; border-radius: 50%; background: #e3e3e3; border: 3px solid #fff; box-shadow: 0 0 0 1px #e3e3e3; }
+.a-step.done i { background: var(--a-ink); box-shadow: 0 0 0 1px var(--a-ink); }
+.a-step.now { color: var(--a-ink); font-weight: 600; }
+.a-step.now i { background: var(--a-yel); box-shadow: 0 0 0 1px var(--a-ink); }
+.a-item { display: flex; gap: 12px; }
+.a-thumb { width: 72px; height: 72px; border-radius: 8px; flex: none; background: #fff8c4; display: grid; place-items: center; font-weight: 700; color: #8a7a00; font-size: 13px; text-align: center; line-height: 1.3; }
+.a-item h3 { margin: 0; font-size: 15px; }
+.a-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.a-chips span { background: #f5f5f5; border-radius: 4px; padding: 2px 6px; font-size: 12px; color: #595959; }
+.a-price { margin-left: auto; color: var(--a-red); font-weight: 700; font-size: 18px; align-self: flex-start; }
+.a-price small { font-size: 12px; }
+.a-seller { display: flex; align-items: center; gap: 10px; }
+.a-ava { width: 40px; height: 40px; border-radius: 50%; background: #1a1a1a; color: var(--a-yel); display: grid; place-items: center; font-weight: 700; flex: none; }
+.a-seller .nm { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.a-tag { font-size: 10px; font-weight: 600; background: #1a1a1a; color: var(--a-yel); padding: 1px 5px; border-radius: 3px; }
+.a-seller small { color: var(--a-sub); font-size: 12px; }
+.a-seller .go { margin-left: auto; color: var(--a-sub); }
+.a-meta { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px; }
+.a-meta dt { color: var(--a-sub); } .a-meta dd { margin: 0; text-align: right; }
+.a-deliv h4 { margin: 0 0 8px; font-size: 14px; display: flex; justify-content: space-between; }
+.a-deliv h4 span { color: #389e0d; font-size: 12px; font-weight: 500; }
+.a-row { display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid #f2f2f2; font-size: 13px; }
+.a-row em { font-style: normal; color: var(--a-sub); }
+.a-bar { position: sticky; bottom: 0; margin-top: auto; background: #fff; padding: 10px 14px 18px; display: flex; gap: 10px; justify-content: flex-end; align-items: center; box-shadow: 0 -1px 0 #eee; }
+.a-bar .tip { margin-right: auto; font-size: 12px; color: var(--a-sub); }
+.a-btn { border: 1px solid #d9d9d9; background: #fff; border-radius: 20px; padding: 9px 16px; font-size: 14px; color: var(--a-ink); }
+.a-btn.pri { background: var(--a-yel); border-color: var(--a-yel); font-weight: 600; }
+.a-btn.pay { background: var(--a-blue); border-color: var(--a-blue); color: #fff; font-weight: 600; padding-inline: 20px; }
+
+/* ========== B · Linear / Stripe ========== */
+.sB { --b-ink: #18181b; --b-sub: #71717a; --b-line: #e8e8ec; --b-soft: #f7f7f8; --b-acc: #5e6ad2; --b-ok: #2f9e6e; --b-warn: #c27c0e;
+  background: #fff; color: var(--b-ink); font-size: 13px; padding: 18px 18px 24px; gap: 16px; }
+.b-crumb { color: var(--b-sub); font-size: 12px; display: flex; justify-content: space-between; }
+.sB h1 { margin: 0; font-size: 19px; font-weight: 600; letter-spacing: -0.01em; }
+.b-pill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--b-line); border-radius: 999px; padding: 3px 9px 3px 7px; font-size: 12px; font-weight: 500; align-self: flex-start; }
+.b-pill i { width: 8px; height: 8px; border-radius: 50%; background: var(--c); }
+.b-pill.live i { animation: pulse 1.4s infinite; }
+.b-props { display: grid; grid-template-columns: 76px 1fr; gap: 9px 12px; margin: 0; padding: 14px 0; border-block: 1px solid var(--b-line); }
+.b-props dt { color: var(--b-sub); }
+.b-props dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.b-who { display: inline-flex; align-items: center; gap: 5px; }
+.b-tag { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--b-line); border-radius: 4px; padding: 0 4px; color: var(--b-sub); }
+.b-call { border: 1px solid #f0d9a8; background: #fffaf0; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 10px; animation: rise .35s ease; }
+.b-call b { font-weight: 600; }
+.b-call p { margin: 2px 0 0; color: var(--b-sub); }
+.b-call .row { display: flex; gap: 8px; align-items: center; }
+.b-btn { border: 1px solid var(--b-line); background: #fff; border-radius: 6px; padding: 6px 11px; font-size: 13px; color: var(--b-ink); }
+.b-btn.pri { background: var(--b-ink); border-color: var(--b-ink); color: #fff; }
+.b-kbd { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--b-sub); }
+.sB h2 { margin: 4px 0 0; font-size: 12px; font-weight: 500; color: var(--b-sub); }
+.b-log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.b-log li { display: grid; grid-template-columns: 14px 1fr; gap: 10px; position: relative; padding-bottom: 14px; }
+.b-log li::before { content: ""; position: absolute; left: 6.5px; top: 14px; bottom: 0; width: 1px; background: var(--b-line); }
+.b-log li:last-child::before { display: none; }
+.b-log .dot { width: 8px; height: 8px; border-radius: 50%; margin: 4px 3px; background: #c4c4cc; }
+.b-log li.now .dot { background: var(--b-acc); animation: pulse 1.4s infinite; }
+.b-log li.now { animation: rise .35s ease; }
+.b-log .t { font-family: var(--mono); font-size: 11px; color: var(--b-sub); margin-left: 6px; }
+.b-log .d { color: var(--b-sub); margin-top: 2px; }
+.b-table { border: 1px solid var(--b-line); border-radius: 8px; overflow: hidden; animation: rise .35s ease; }
+.b-table .hd { display: flex; justify-content: space-between; padding: 8px 10px; background: var(--b-soft); border-bottom: 1px solid var(--b-line); font-size: 12px; }
+.b-table .hd span { color: var(--b-ok); }
+.b-table table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.b-table td { padding: 6px 10px; border-top: 1px solid var(--b-line); }
+.b-table tr:first-child td { border-top: 0; }
+.b-table td.n { text-align: right; font-family: var(--mono); color: var(--b-sub); }
+.b-actions { display: flex; gap: 8px; justify-content: flex-end; }
+
+/* ========== C · iOS 原生 ========== */
+.sC { --c-bg: #f2f2f7; --c-cell: #fff; --c-ink: #000; --c-sub: #8a8a8e; --c-sep: #e1e1e6; --c-tint: #007aff; --c-ok: #34c759; --c-orange: #ff9500;
+  background: var(--c-bg); color: var(--c-ink); font-size: 15px; letter-spacing: -0.01em; }
+.c-nav { padding: 12px 16px 0; color: var(--c-tint); font-size: 17px; display: flex; justify-content: space-between; }
+.c-large { font-size: 30px; font-weight: 700; padding: 6px 16px 0; letter-spacing: -0.02em; }
+.c-hero { margin: 14px 16px 0; background: var(--c-cell); border-radius: 14px; padding: 16px; display: flex; gap: 14px; align-items: center; }
+.c-hero svg { flex: none; }
+.c-hero .ring { transition: stroke-dashoffset .6s cubic-bezier(.2,.9,.3,1.2); }
+.c-hero b { font-size: 19px; display: block; }
+.c-hero span { color: var(--c-sub); font-size: 13px; }
+.c-lab { padding: 22px 32px 6px; font-size: 13px; color: var(--c-sub); text-transform: uppercase; }
+.c-group { margin: 0 16px; background: var(--c-cell); border-radius: 12px; overflow: hidden; }
+.c-cell { display: flex; align-items: center; gap: 12px; padding: 11px 16px; min-height: 44px; position: relative; }
+.c-cell + .c-cell::before { content: ""; position: absolute; top: 0; left: 52px; right: 0; height: 1px; background: var(--c-sep); }
+.c-group.plain .c-cell + .c-cell::before { left: 16px; }
+.c-cell .r { margin-left: auto; color: var(--c-sub); font-size: 15px; }
+.c-cell .chev { color: #c4c4c7; margin-left: 6px; }
+.c-ic { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; flex: none; }
+.c-ic.done { background: var(--c-ok); }
+.c-ic.now { border: 2px solid var(--c-tint); }
+.c-ic.now::after { content: ""; width: 10px; height: 10px; border-radius: 50%; background: var(--c-tint); animation: pulse 1.2s infinite; }
+.c-ic.todo { border: 2px solid var(--c-sep); }
+.c-cell.todo .lb { color: var(--c-sub); }
+.c-ava { width: 36px; height: 36px; border-radius: 9px; background: linear-gradient(135deg, #5ac8fa, #007aff); color: #fff; display: grid; place-items: center; font-weight: 600; flex: none; }
+.c-cell small { display: block; color: var(--c-sub); font-size: 13px; }
+.c-foot { padding: 8px 32px 0; font-size: 13px; color: var(--c-sub); }
+.c-sheet { position: sticky; bottom: 0; margin-top: auto; padding: 12px 16px 22px; background: rgba(242,242,247,.78); backdrop-filter: blur(18px) saturate(1.8); -webkit-backdrop-filter: blur(18px) saturate(1.8); display: flex; flex-direction: column; gap: 8px; border-top: .5px solid rgba(0,0,0,.12); }
+.c-btn { border: 0; border-radius: 14px; padding: 15px; font-size: 17px; font-weight: 600; background: var(--c-tint); color: #fff; transition: transform .15s ease; }
+.c-btn:active { transform: scale(.97); }
+.c-btn.ghost { background: transparent; color: var(--c-tint); font-weight: 400; padding: 6px; }
+.c-btn.gray { background: #e5e5ea; color: var(--c-ink); }
+.c-pad { height: 24px; }
+
+/* ========== E · AI 任务流 ========== */
+.sE { --e-bg: #fbfaf7; --e-ink: #22211d; --e-sub: #85827a; --e-line: #e9e6de; --e-acc: #1d6b52; --e-pay: #1677ff; --e-card: #fff;
+  background: var(--e-bg); color: var(--e-ink); font-size: 14px; padding: 18px 18px 28px; gap: 18px; }
+.e-head { display: flex; gap: 10px; align-items: center; }
+.e-av { width: 34px; height: 34px; border-radius: 50%; background: var(--e-acc); display: grid; place-items: center; flex: none; }
+.e-who { font-size: 12px; color: var(--e-sub); }
+.e-task { font-family: var(--serif); font-size: 18px; line-height: 1.35; }
+.e-quote { border-left: 2px solid var(--e-line); padding: 2px 0 2px 12px; color: var(--e-sub); font-size: 13px; line-height: 1.6; }
+.e-stream { display: flex; flex-direction: column; gap: 12px; }
+.e-step { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; }
+.e-step .ic { width: 18px; height: 18px; margin-top: 1px; display: grid; place-items: center; }
+.e-step .ic .sp { width: 13px; height: 13px; border: 2px solid var(--e-line); border-top-color: var(--e-acc); border-radius: 50%; animation: spin .8s linear infinite; }
+.e-step .tx { line-height: 1.5; }
+.e-step .tx small { display: block; color: var(--e-sub); font-size: 12.5px; }
+.e-step.done .tx > span { color: var(--e-sub); }
+.e-step.now { animation: rise .4s ease; }
+.e-step.now .tx > span { background: linear-gradient(90deg, var(--e-ink) 0%, var(--e-ink) 40%, #b9b4a8 50%, var(--e-ink) 60%, var(--e-ink) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 2.2s linear infinite; }
+.e-card { background: var(--e-card); border: 1px solid var(--e-line); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 12px; box-shadow: 0 6px 24px -12px rgba(40,30,10,.18); animation: rise .4s ease; }
+.e-card .k { font-size: 12px; color: var(--e-sub); }
+.e-card .amt { font-size: 30px; font-weight: 600; letter-spacing: -0.02em; }
+.e-card .amt small { font-size: 16px; }
+.e-card .why { font-size: 13px; line-height: 1.6; color: var(--e-ink); }
+.e-card .seller { display: flex; justify-content: space-between; font-size: 12.5px; color: var(--e-sub); border-top: 1px dashed var(--e-line); padding-top: 10px; }
+.e-btn { border: 0; border-radius: 12px; padding: 13px; font-size: 15px; font-weight: 600; background: var(--e-pay); color: #fff; }
+.e-btn.sec { background: transparent; color: var(--e-sub); font-weight: 400; padding: 4px; }
+.e-btn.ok { background: var(--e-acc); }
+.e-res table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.e-res td { padding: 6px 0; border-top: 1px solid var(--e-line); }
+.e-res td.n { text-align: right; color: var(--e-sub); }
+.e-done { text-align: center; font-size: 12.5px; color: var(--e-sub); }
+</style>
+
+<div class="wrap">
+  <header class="lab-head">
+    <div>
+      <h1>hive 风格实验室 · 第 1 轮：订单详情</h1>
+      <p>同一张订单、同一组数据，换四种风格。切换上面的阶段，看每种风格怎么表达“agent 在干活”和“该你付钱了”。</p>
+    </div>
+    <div class="controls">
+      <div class="stages" id="stages"></div>
+      <button class="ctl" id="play" type="button">自动演示</button>
+    </div>
+  </header>
+  <div class="hint">自动演示会在“付款”和“交付”这两步停下，等你点手机里的按钮，和真实流程一样。</div>
+  <div class="tabs" id="tabs"></div>
+  <main class="frames" id="frames"></main>
+
+  <section class="notes">
+    <h2>看的时候问自己</h2>
+    <div><h3>信任</h3><ul><li>哪一版让你最放心点“付款”？</li><li>¥5 和“由 agent 发起”是否一眼可见？</li></ul></div>
+    <div><h3>进度</h3><ul><li>不看文字，能否知道现在卡在哪一步、等谁？</li><li>派单、干活这种等待，哪一版最不焦虑？</li></ul></div>
+    <div><h3>身份</h3><ul><li>哪一版最像 hive，而不是闲鱼或 Linear 的复刻？</li><li>哪些元素想留下，拼到最终方案里？</li></ul></div>
+  </section>
+</div>
+
+<script>
+const STAGES = [
+  { short: "下单", t: "14:02:11", actor: "agent", text: "你的 agent 下了单", detail: "杭州 · 奶茶 · 湖滨 / 武林 / 滨江" },
+  { short: "派单", t: "14:02:12", actor: "hive", text: "hive 正在找卖家", detail: "3 位在线卖家，按价格和通过率排序" },
+  { short: "接单", t: "14:02:14", actor: "seller", text: "茶饮数据通 接了单", detail: "agent 卖家 · 自动接单 · 用时 2 秒" },
+  { short: "付款", t: "14:02:14", actor: "you", text: "等你在支付宝确认付款", detail: "¥5.00 · 15 分钟内有效" },
+  { short: "干活", t: "14:03:41", actor: "seller", text: "卖家 agent 正在整理数据", detail: "通常 1 分钟内交付，最长 10 分钟" },
+  { short: "交付", t: "14:03:52", actor: "seller", text: "交付了 12 家门店数据", detail: "已通过格式校验，等你验收" },
+  { short: "完成", t: "14:04:05", actor: "agent", text: "你的 agent 验收通过", detail: "订单完成，计入卖家通过率" },
+];
+const HEAD = ["已下单", "正在派单", "卖家已接单", "等待付款", "卖家干活中", "已交付", "交易完成"];
+const ACTOR = { agent: "你的 agent", hive: "hive", seller: "卖家", you: "你" };
+const BRANDS = ["一点点", "喜茶", "茶百道", "古茗", "蜜雪冰城", "霸王茶姬", "沪上阿姨", "奈雪的茶"];
+const AREAS = ["湖滨", "武林", "滨江"];
+const STORES = AREAS.flatMap((area, i) => BRANDS.slice(0, 3 + (i % 3)).map((name, j) => ({
+  name, area, rating: Math.round((4 + ((i + j) % 10) / 10) * 10) / 10, price: 10 + ((i * 7 + j * 5) % 20),
+})));
+const SPECS = [
+  { k: "A", name: "闲鱼 / 支付宝", ref: "国内消费 App", idea: "黄色状态头、白卡片、底部大按钮。国内用户最熟悉的订单页。" },
+  { k: "B", name: "Linear / Stripe", ref: "开发者工具", idea: "黑白灰、等宽字、动态日志。把订单当成一条可追溯的记录。" },
+  { k: "C", name: "iOS 原生", ref: "Apple 自带 App", idea: "大标题、分组列表、毛玻璃底栏。PWA 拿在手里像原生 App。" },
+  { k: "E", name: "AI 任务流", ref: "ChatGPT / Perplexity", idea: "以 agent 的视角一步步展开，付款是对话里的一张确认卡。" },
+];
+
+const S = { i: 3, secs: 900, playing: false, focus: "A" };
+const st = (n) => (S.i === 6 || n < S.i ? "done" : n === S.i ? "now" : "todo");
+const cd = () => `${String(Math.floor(S.secs / 60)).padStart(2, "0")}:${String(S.secs % 60).padStart(2, "0")}`;
+const check = (c = "#fff", s = 12) => `<svg width="${s}" height="${s}" viewBox="0 0 12 12"><path d="M2.5 6.2l2.3 2.3 4.7-5" fill="none" stroke="${c}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+const agentGlyph = (bg, fg, s = 28) => `<svg width="${s}" height="${s}" viewBox="0 0 28 28"><rect x="3" y="6" width="22" height="17" rx="6" fill="${bg}"/><circle cx="10.5" cy="14.5" r="2" fill="${fg}"/><circle cx="17.5" cy="14.5" r="2" fill="${fg}"/><path d="M14 2.5v3.5" stroke="${bg}" stroke-width="2" stroke-linecap="round"/></svg>`;
+
+/* ---- A ---- */
+function A(i) {
+  const sub = [
+    "正在提交给 hive", "正在为你匹配卖家，通常几秒钟",
+    "马上生成付款入口", `剩余 <b class="cd tnum">${cd()}</b>，超时自动取消`,
+    "已付款，付款后不能取消", "卖家已交付，请确认收货", "钱已到卖家支付宝",
+  ][i];
+  const bar = [
+    `<span class="tip">付款前可随时取消</span><button class="a-btn" type="button">取消订单</button>`,
+    `<span class="tip">付款前可随时取消</span><button class="a-btn" type="button">取消订单</button>`,
+    `<span class="tip">付款前可随时取消</span><button class="a-btn" type="button">取消订单</button>`,
+    `<button class="a-btn" type="button">取消订单</button><button class="a-btn pay" type="button" data-act="pay">去支付宝付款 ¥5.00</button>`,
+    `<span class="tip">卖家正在干活，交付后通知你</span><button class="a-btn" type="button">联系卖家</button>`,
+    `<button class="a-btn" type="button">拒收</button><button class="a-btn pri" type="button" data-act="accept">确认收货</button>`,
+    `<button class="a-btn" type="button">评价</button><button class="a-btn pri" type="button" data-act="again">再来一单</button>`,
+  ][i];
+  const pct = (Math.min(i, 6) / 6) * 86;
+  return `<div class="sA">
+    <div class="a-top">
+      <div class="a-nav"><span>‹</span><b>订单详情</b><span>···</span></div>
+      <div class="a-big">${HEAD[i]}</div><div class="a-sub">${sub}</div>
+    </div>
+    <div class="a-body">
+      <div class="a-card a-agent">${agentGlyph("#1a1a1a", "#ffe60f")}<div>由你的 agent「Claude」发起<small>agent 负责下单和验收，每笔付款都要你在支付宝确认</small></div></div>
+      <div class="a-card"><div class="a-prog"><div class="bar" style="width:${pct}%"></div>
+        ${STAGES.map((s, n) => `<div class="a-step ${st(n)}"><i></i>${s.short}</div>`).join("")}</div></div>
+      <div class="a-card a-item"><div class="a-thumb">竞品<br>数据</div>
+        <div><h3>竞品门店数据</h3><div class="a-chips"><span>杭州</span><span>奶茶</span>${AREAS.map((a) => `<span>${a}</span>`).join("")}</div></div>
+        <div class="a-price"><small>¥</small>5.00</div></div>
+      ${i >= 2 ? `<div class="a-card a-seller"><div class="a-ava">茶</div><div><div class="nm">茶饮数据通<span class="a-tag">AGENT</span></div><small>通过率 98% · 已成交 1,243 单</small></div><span class="go">›</span></div>` : ""}
+      ${i >= 5 ? `<div class="a-card a-deliv"><h4>交付内容<span>✓ 格式校验通过</span></h4>
+        ${STORES.slice(0, 5).map((s) => `<div class="a-row"><span>${s.name} · ${s.area}</span><em>${s.rating} 分 · 人均 ¥${s.price}</em></div>`).join("")}
+        <div class="a-row"><em>共 ${STORES.length} 家门店</em><em>查看全部 ›</em></div></div>` : ""}
+      <dl class="a-card a-meta"><dt>订单编号</dt><dd class="tnum">H202610150042</dd><dt>下单时间</dt><dd class="tnum">2026-10-15 14:02</dd><dt>付款方式</dt><dd>支付宝 · 钱直接给卖家</dd></dl>
+    </div>
+    <div class="a-bar">${bar}</div>
+  </div>`;
+}
+
+/* ---- B ---- */
+function B(i) {
+  const color = ["#a1a1aa", "#5e6ad2", "#5e6ad2", "#c27c0e", "#5e6ad2", "#2f9e6e", "#2f9e6e"][i];
+  const live = [1, 4].includes(i);
+  const log = STAGES.slice(0, Math.min(i, 6) + 1).map((s, n) => `<li class="${n === i && i < 6 ? "now" : ""}"><span class="dot"></span><div>
+      <div>${s.actor === "you" ? "<b>你</b> 在支付宝确认付款" : `<b>${ACTOR[s.actor]}</b> ${s.text.replace(/^(你的 agent|hive|卖家 agent|卖家)\s*/, "")}`}<span class="t">${s.t}</span></div>
+      <div class="d">${s.detail}</div></div></li>`).join("");
+  return `<div class="sB">
+    <div class="b-crumb"><span>订单 / <span class="mono">H-1015-0042</span></span><span class="mono">⌘K</span></div>
+    <h1>竞品门店数据</h1>
+    <span class="b-pill ${live ? "live" : ""}" style="--c:${color}"><i></i>${HEAD[i]}</span>
+    ${i === 3 ? `<div class="b-call"><div><b>需要你付款</b><p>在支付宝确认 ¥5.00，钱直接进卖家账户。剩余 <span class="cd mono">${cd()}</span></p></div>
+      <div class="row"><button class="b-btn pri" type="button" data-act="pay">在支付宝中确认 ↗</button><button class="b-btn" type="button">取消</button><span class="b-kbd">P</span></div></div>` : ""}
+    <dl class="b-props">
+      <dt>能力</dt><dd class="mono">market-data.competitors</dd>
+      <dt>价格</dt><dd class="tnum">¥5.00</dd>
+      <dt>发起</dt><dd><span class="b-who">Claude <span class="b-tag">agent</span></span> · 你确认付款</dd>
+      <dt>卖家</dt><dd>${i >= 2 ? `<span class="b-who">茶饮数据通 <span class="b-tag">agent</span></span> · 通过率 98%` : `<span style="color:#a1a1aa">派单中…</span>`}</dd>
+      <dt>输入</dt><dd class="mono" style="font-size:12px">{ city: "杭州", category: "奶茶", areas: [3] }</dd>
+    </dl>
+    ${i >= 5 ? `<div class="b-table"><div class="hd"><b>stores · ${STORES.length} 行</b><span>● schema 通过</span></div><table>
+      ${STORES.slice(0, 6).map((s) => `<tr><td>${s.name}</td><td>${s.area}</td><td class="n">${s.rating.toFixed(1)}</td><td class="n">¥${s.price}</td></tr>`).join("")}</table></div>` : ""}
+    ${i === 5 ? `<div class="b-actions"><button class="b-btn" type="button">拒绝</button><button class="b-btn pri" type="button" data-act="accept">验收通过</button></div>` : ""}
+    <h2>动态</h2>
+    <ol class="b-log">${log}</ol>
+  </div>`;
+}
+
+/* ---- C ---- */
+function C(i) {
+  const C_ = 2 * Math.PI * 24, p = Math.min(i, 6) / 6;
+  const sub = ["刚刚", "通常几秒钟", "马上可以付款", `<span class="cd tnum">${cd()}</span> 内付款`, "通常 1 分钟内交付", "请检查后验收", "今天 14:04"][i];
+  const ringColor = i === 3 ? "#ff9500" : i >= 5 ? "#34c759" : "#007aff";
+  const sheet = {
+    3: `<button class="c-btn" type="button" data-act="pay">用支付宝付款 ¥5.00</button><button class="c-btn ghost" type="button">取消订单</button>`,
+    5: `<button class="c-btn" type="button" data-act="accept">验收通过</button><button class="c-btn ghost" type="button">拒绝</button>`,
+    6: `<button class="c-btn gray" type="button" data-act="again">再来一单</button>`,
+  }[i];
+  return `<div class="sC">
+    <div class="c-nav"><span>‹ 订单</span><span>···</span></div>
+    <div class="c-large">竞品门店数据</div>
+    <div class="c-hero"><svg width="58" height="58" viewBox="0 0 58 58"><circle cx="29" cy="29" r="24" fill="none" stroke="#e5e5ea" stroke-width="6"/>
+      <circle class="ring" cx="29" cy="29" r="24" fill="none" stroke="${ringColor}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${C_}" stroke-dashoffset="${C_ * (1 - p)}" transform="rotate(-90 29 29)"/>
+      <text x="29" y="34" text-anchor="middle" font-size="14" font-weight="600" fill="#000">${Math.min(i + 1, 7)}/7</text></svg>
+      <div><b>${HEAD[i]}</b><span>${sub}</span></div></div>
+    <div class="c-lab">进度</div>
+    <div class="c-group">${STAGES.map((s, n) => { const k = st(n); return `<div class="c-cell ${k}"><span class="c-ic ${k}">${k === "done" ? check() : ""}</span><span class="lb">${s.text}</span><span class="r tnum">${k === "todo" ? "" : s.t.slice(0, 5)}</span></div>`; }).join("")}</div>
+    ${i >= 2 ? `<div class="c-lab">卖家</div><div class="c-group"><div class="c-cell"><div class="c-ava">茶</div><div>茶饮数据通<small>Agent · 通过率 98%</small></div><span class="r">1,243 单</span><span class="chev">›</span></div></div>` : ""}
+    ${i >= 5 ? `<div class="c-lab">交付内容 · ${STORES.length} 家</div><div class="c-group plain">${STORES.slice(0, 4).map((s) => `<div class="c-cell"><div>${s.name}<small>${s.area}</small></div><span class="r tnum">${s.rating} 分</span></div>`).join("")}<div class="c-cell" style="color:#007aff">查看全部</div></div>` : ""}
+    <div class="c-lab">订单</div>
+    <div class="c-group plain"><div class="c-cell">价格<span class="r tnum">¥5.00</span></div><div class="c-cell">发起方<span class="r">Claude（你的 agent）</span></div><div class="c-cell">付款方式<span class="r">支付宝</span></div></div>
+    <div class="c-foot">agent 可以替你下单和验收，每一笔付款都需要你本人确认。</div>
+    ${sheet ? `<div class="c-sheet">${sheet}</div>` : `<div class="c-pad"></div>`}
+  </div>`;
+}
+
+/* ---- E ---- */
+function E(i) {
+  const steps = STAGES.slice(0, Math.min(i, 6) + 1).map((s, n) => {
+    const k = st(n);
+    if (n === 3 && i === 3) return `<div class="e-card"><div class="k">需要你确认 · 剩余 <span class="cd tnum">${cd()}</span></div>
+      <div class="amt"><small>¥</small>5.00</div>
+      <div class="why">我想买一份湖滨、武林、滨江三个商圈的奶茶竞品门店数据，用来对比各商圈的竞争密度。这是选址分析的第一步。</div>
+      <button class="e-btn" type="button" data-act="pay">在支付宝确认付款</button><button class="e-btn sec" type="button">不买了</button>
+      <div class="seller"><span>卖家：茶饮数据通（agent）</span><span>通过率 98%</span></div></div>`;
+    if (n === 5 && i >= 5) return `<div class="e-card e-res"><div class="k">交付结果 · ${STORES.length} 家门店 · 格式已校验</div>
+      <table>${STORES.slice(0, 5).map((s) => `<tr><td>${s.name}</td><td>${s.area}</td><td class="n">${s.rating} 分</td></tr>`).join("")}</table>
+      ${i === 5 ? `<button class="e-btn ok" type="button" data-act="accept">没问题，继续下一步</button>` : ""}</div>`;
+    const ic = k === "now" ? `<span class="sp"></span>` : check("#1d6b52", 14);
+    return `<div class="e-step ${k}"><span class="ic">${ic}</span><div class="tx"><span>${s.text}</span><small>${s.detail}</small></div></div>`;
+  }).join("");
+  return `<div class="sE">
+    <div class="e-head"><div class="e-av">${agentGlyph("#fbfaf7", "#1d6b52", 22)}</div><div><div class="e-who">Claude · 你的 agent</div><div class="e-task">在帮你买「竞品门店数据」</div></div></div>
+    <div class="e-quote">你说：“我想在杭州开奶茶店，帮我出一份选址分析。”</div>
+    <div class="e-stream">${steps}</div>
+    ${i === 6 ? `<div class="e-done">这一单完成了 · 接下来我会去买“选址对比图表”</div>` : ""}
+  </div>`;
+}
+
+const R = { A, B, C, E };
+const $ = (s) => document.querySelector(s);
+
+function build() {
+  $("#stages").innerHTML = STAGES.map((s, n) => `<button type="button" data-stage="${n}">${s.short}</button>`).join("");
+  $("#tabs").innerHTML = SPECS.map((s) => `<button type="button" data-tab="${s.k}">${s.k} · ${s.name}</button>`).join("");
+  $("#frames").innerHTML = SPECS.map((s) => `<section class="spec" data-spec="${s.k}">
+    <div class="spec-meta"><b>${s.k} · ${s.name}<span>参照 ${s.ref}</span></b><p>${s.idea}</p></div>
+    <div class="phone"><div class="screen" id="scr-${s.k}"></div></div></section>`).join("");
+}
+function render() {
+  for (const k in R) $("#scr-" + k).innerHTML = R[k](S.i);
+  document.querySelectorAll("[data-stage]").forEach((b) => b.classList.toggle("on", +b.dataset.stage === S.i));
+  document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.focus));
+  document.querySelectorAll("[data-spec]").forEach((b) => b.classList.toggle("focus", b.dataset.spec === S.focus));
+  $("#play").classList.toggle("on", S.playing);
+  $("#play").textContent = S.playing ? "演示中…" : "自动演示";
+}
+function go(n) { if (n === 3 && S.i !== 3) S.secs = 900; S.i = n; render(); }
+
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-act],[data-stage],[data-tab],#play");
+  if (!t) return;
+  if (t.id === "play") { S.playing = !S.playing; if (S.playing && S.i === 6) go(0); else render(); return; }
+  if (t.dataset.stage) { S.playing = false; go(+t.dataset.stage); return; }
+  if (t.dataset.tab) { S.focus = t.dataset.tab; render(); return; }
+  const a = t.dataset.act;
+  if (a === "pay") go(4);
+  if (a === "accept") go(6);
+  if (a === "again") go(0);
+});
+setInterval(() => {
+  if (S.i === 3 && S.secs > 0) { S.secs--; document.querySelectorAll(".cd").forEach((el) => (el.textContent = cd())); }
+}, 1000);
+setInterval(() => {
+  if (!S.playing) return;
+  if ([0, 1, 2, 4].includes(S.i)) go(S.i + 1);
+  else if (S.i === 6) { S.playing = false; render(); }
+}, 1600);
+
+build();
+render();
+</script>

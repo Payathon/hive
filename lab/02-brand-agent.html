@@ -1,0 +1,253 @@
+<title>hive 品牌色与 AI 身份</title>
+<style>
+/* Layout: lab shell (theme-aware) around four A-style phones; each phone is one brand palette, a shared toggle swaps how the AI is shown. */
+:root {
+  --bg: #f3f3f1; --panel: #ffffff; --fg: #1c1c1a; --muted: #6b6b66; --line: #deddd8; --chip: #e9e8e4; --accent: #2f5bd3; --frame: #1c1c1a;
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --bg: #171716; --panel: #212120; --fg: #ecebe6; --muted: #9c9b95; --line: #343431; --chip: #2c2c2a; --accent: #7d9cf0; --frame: #3a3a37; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --bg: #171716; --panel: #212120; --fg: #ecebe6; --muted: #9c9b95; --line: #343431; --chip: #2c2c2a; --accent: #7d9cf0; --frame: #3a3a37; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--fg); font-family: var(--sans); }
+button { font: inherit; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.wrap { padding-inline: 16px; padding-block: 24px 48px; max-width: 1640px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.lab-head h1 { margin: 0; font-size: 22px; text-wrap: balance; }
+.lab-head p { margin: 4px 0 0; color: var(--muted); font-size: 13px; max-width: 70ch; line-height: 1.6; }
+.bar-row { display: flex; flex-wrap: wrap; gap: 10px 20px; align-items: center; }
+.bar-row > span { font-size: 12px; color: var(--muted); }
+.seg { display: flex; flex-wrap: wrap; gap: 4px; background: var(--chip); padding: 3px; border-radius: 10px; }
+.seg button { border: 0; background: transparent; color: var(--muted); padding: 6px 10px; border-radius: 7px; font-size: 13px; }
+.seg button.on { background: var(--panel); color: var(--fg); box-shadow: 0 1px 2px rgba(0,0,0,.08); }
+.ctl { border: 1px solid var(--line); background: var(--panel); color: var(--fg); padding: 7px 12px; border-radius: 8px; font-size: 13px; }
+.ctl.on { border-color: var(--accent); color: var(--accent); }
+.xdesc { font-size: 13px; color: var(--muted); }
+.tabs { display: none; }
+.frames { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }
+.spec { display: flex; flex-direction: column; gap: 10px; min-width: 0; align-items: center; }
+.spec-meta { width: 100%; max-width: 375px; display: flex; gap: 10px; align-items: flex-start; }
+.sw { width: 28px; height: 28px; border-radius: 8px; flex: none; border: 1px solid var(--line); }
+.spec-meta b { font-size: 14px; }
+.spec-meta p { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+.phone { width: 100%; max-width: 375px; height: 760px; border: 9px solid var(--frame); border-radius: 46px; overflow: hidden; background: #fff; }
+.screen { height: 100%; overflow-y: auto; display: flex; flex-direction: column; scrollbar-width: none; }
+.screen::-webkit-scrollbar { display: none; }
+.screen > div { flex: 1 0 auto; display: flex; flex-direction: column; }
+@media (max-width: 1500px) { .frames { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 820px) {
+  .tabs { display: flex; }
+  .frames { grid-template-columns: 1fr; }
+  .spec:not(.focus) { display: none; }
+  .phone { height: 78svh; max-width: 430px; border-width: 6px; border-radius: 30px; }
+}
+.tnum { font-variant-numeric: tabular-nums; }
+@keyframes rise { from { opacity: .3; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+/* ===== A framework, palette comes in as custom properties on .sA ===== */
+.sA { --bg2: #f4f4f4; --ink: #1a1a1a; --sub: #8c8c8c; --red: #ff4d2d; --alipay: #1677ff;
+  background: var(--bg2); color: var(--ink); font-size: 14px; }
+.a-top { background: linear-gradient(180deg, var(--main) 0%, var(--soft) 70%, var(--bg2) 100%); color: var(--on); padding: 14px 16px 34px; }
+.a-nav { display: flex; justify-content: space-between; font-size: 16px; }
+.a-nav b { font-weight: 600; }
+.a-head { display: flex; gap: 10px; align-items: center; margin-top: 22px; }
+.a-big { font-size: 24px; font-weight: 700; }
+.a-sub { font-size: 13px; margin-top: 4px; color: var(--onsub); }
+.a-body { padding: 0 12px 12px; margin-top: -22px; display: flex; flex-direction: column; gap: 10px; }
+.a-card { background: #fff; border-radius: 12px; padding: 14px; }
+.a-agent { display: flex; gap: 10px; align-items: center; font-size: 13px; }
+.a-agent small { display: block; color: var(--sub); font-size: 12px; margin-top: 1px; }
+.a-prog { display: grid; grid-template-columns: repeat(7, 1fr); position: relative; }
+.a-prog::before { content: ""; position: absolute; left: 7%; right: 7%; top: 6px; height: 2px; background: #eee; }
+.a-prog .bar { position: absolute; left: 7%; top: 6px; height: 2px; background: var(--strong); transition: width .4s ease; }
+.a-step { position: relative; display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11px; color: var(--sub); }
+.a-step i { width: 14px; height: 14px; border-radius: 50%; background: #e3e3e3; border: 3px solid #fff; box-shadow: 0 0 0 1px #e3e3e3; }
+.a-step.done i { background: var(--strong); box-shadow: 0 0 0 1px var(--strong); }
+.a-step.now { color: var(--ink); font-weight: 600; }
+.a-step.now i { background: var(--main); box-shadow: 0 0 0 1px var(--strong); }
+.a-item { display: flex; gap: 12px; }
+.a-thumb { width: 72px; height: 72px; border-radius: 8px; flex: none; background: var(--tbg); color: var(--tink); display: grid; place-items: center; font-weight: 700; font-size: 13px; text-align: center; line-height: 1.3; }
+.a-item h3 { margin: 0; font-size: 15px; }
+.a-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.a-chips span { background: #f5f5f5; border-radius: 4px; padding: 2px 6px; font-size: 12px; color: #595959; }
+.a-price { margin-left: auto; color: var(--red); font-weight: 700; font-size: 18px; align-self: flex-start; }
+.a-price small { font-size: 12px; }
+.a-by { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #f2f2f2; font-size: 12.5px; color: var(--sub); }
+.a-by b { color: var(--ink); font-weight: 500; }
+.a-seller { display: flex; align-items: center; gap: 10px; }
+.a-seller .nm { font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.a-tag { font-size: 10px; font-weight: 600; background: var(--tagbg); color: var(--tagfg); padding: 1px 5px; border-radius: 3px; }
+.a-seller small { color: var(--sub); font-size: 12px; }
+.a-seller .go { margin-left: auto; color: var(--sub); }
+.a-meta { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; font-size: 13px; margin: 0; }
+.a-meta dt { color: var(--sub); } .a-meta dd { margin: 0; text-align: right; }
+.a-deliv h4 { margin: 0 0 8px; font-size: 14px; display: flex; justify-content: space-between; }
+.a-deliv h4 span { color: #389e0d; font-size: 12px; font-weight: 500; }
+.a-row { display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid #f2f2f2; font-size: 13px; }
+.a-row em { font-style: normal; color: var(--sub); }
+.a-bar { position: sticky; bottom: 0; margin-top: auto; background: #fff; padding: 10px 14px 18px; display: flex; gap: 10px; justify-content: flex-end; align-items: center; box-shadow: 0 -1px 0 #eee; }
+.a-bar .tip { margin-right: auto; font-size: 12px; color: var(--sub); }
+.a-btn { border: 1px solid #d9d9d9; background: #fff; border-radius: 20px; padding: 9px 16px; font-size: 14px; color: var(--ink); }
+.a-btn.pri { background: var(--main); border-color: var(--main); color: var(--on); font-weight: 600; }
+.a-btn.pay { background: var(--alipay); border-color: var(--alipay); color: #fff; font-weight: 600; padding-inline: 20px; }
+
+/* avatars: circle = person/brand, hex = AI */
+.av { width: 40px; height: 40px; flex: none; display: grid; place-items: center; font-weight: 700; position: relative; }
+.av.circle { border-radius: 50%; background: var(--strong); color: var(--avfg); }
+.av.hex { clip-path: polygon(50% 0, 96% 25%, 96% 75%, 50% 100%, 4% 75%, 4% 25%); background: var(--strong); color: var(--avfg); }
+.av.sm { width: 22px; height: 22px; font-size: 11px; }
+.av.on-top { background: var(--on); color: var(--main); }
+.hexwrap { position: relative; flex: none; }
+.hexwrap .ai { position: absolute; right: -4px; bottom: -2px; font-size: 9px; font-weight: 700; background: var(--tagbg); color: var(--tagfg); border: 1.5px solid #fff; border-radius: 6px; padding: 0 3px; line-height: 1.4; }
+
+/* 代付请求 card */
+.df { background: #fff; border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; animation: rise .35s ease; }
+.df-who { display: flex; align-items: center; gap: 10px; }
+.df-who b { font-size: 15px; }
+.df-who small { display: block; color: var(--sub); font-size: 12px; }
+.df-msg { background: #f7f7f7; border-radius: 4px 12px 12px 12px; padding: 10px 12px; font-size: 13.5px; line-height: 1.6; }
+.df-amt { text-align: center; }
+.df-amt .k { font-size: 12px; color: var(--sub); }
+.df-amt .v { font-size: 32px; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
+.df-amt .v small { font-size: 18px; }
+.df-ft { display: flex; justify-content: space-between; font-size: 12px; color: var(--sub); border-top: 1px dashed #eee; padding-top: 10px; }
+</style>
+
+<div class="wrap">
+  <header class="lab-head">
+    <h1>hive 风格实验室 · 第 2 轮：品牌色与 AI 身份</h1>
+    <p>框架沿用第 1 轮选中的 A。四台手机各用一种品牌色；上方切换“AI 怎么出现”，四台一起变。价格红、支付宝蓝这两种国内约定俗成的颜色保持不动。</p>
+  </header>
+  <div class="bar-row"><span>AI 怎么出现</span><div class="seg" id="modes"></div></div>
+  <div class="xdesc" id="mdesc"></div>
+  <div class="bar-row"><span>订单阶段</span><div class="seg" id="stages"></div><button class="ctl" id="play" type="button">自动演示</button></div>
+  <div class="seg tabs" id="tabs"></div>
+  <main class="frames" id="frames"></main>
+</div>
+
+<script>
+const STAGES = ["下单", "派单", "接单", "付款", "干活", "交付", "完成"];
+const HEAD = ["已下单", "正在派单", "卖家已接单", "等待付款", "卖家干活中", "已交付", "交易完成"];
+const BRANDS = ["一点点", "喜茶", "茶百道", "古茗", "蜜雪冰城", "霸王茶姬", "沪上阿姨", "奈雪的茶"];
+const AREAS = ["湖滨", "武林", "滨江"];
+const STORES = AREAS.flatMap((area, i) => BRANDS.slice(0, 3 + (i % 3)).map((name, j) => ({
+  name, area, rating: Math.round((4 + ((i + j) % 10) / 10) * 10) / 10, price: 10 + ((i * 7 + j * 5) % 20),
+})));
+const PALETTES = [
+  { k: "xianyu", name: "闲鱼黄（对照）", note: "第 1 轮的颜色，留作对照。问题是一看就是闲鱼。",
+    v: { avfg: "#ffe60f", main: "#ffe60f", soft: "#fff27a", on: "#1a1a1a", onsub: "#5a5200", strong: "#1a1a1a", tbg: "#fff8c4", tink: "#8a7a00", tagbg: "#1a1a1a", tagfg: "#ffe60f" } },
+  { k: "honey", name: "蜂蜜琥珀", note: "呼应 hive 蜂巢。比闲鱼黄更暖、更深，配深棕色字。",
+    v: { avfg: "#ffb81c", main: "#ffb81c", soft: "#ffd978", on: "#2b1d00", onsub: "#6b4a00", strong: "#2b1d00", tbg: "#fff1cc", tink: "#9a6400", tagbg: "#2b1d00", tagfg: "#ffb81c" } },
+  { k: "orange", name: "活力橙", note: "国内电商最常见的热闹感，白字。离淘宝很近。",
+    v: { avfg: "#ffffff", main: "#ff7a1a", soft: "#ffb27a", on: "#ffffff", onsub: "#fff1e6", strong: "#ff7a1a", tbg: "#fff0e3", tink: "#c2500a", tagbg: "#ff7a1a", tagfg: "#ffffff" } },
+  { k: "blue", name: "支付宝蓝", note: "和付款按钮同色，最“像正规支付”。但会和支付宝本身分不开。",
+    v: { avfg: "#ffffff", main: "#1677ff", soft: "#69a7ff", on: "#ffffff", onsub: "#e6f0ff", strong: "#1677ff", tbg: "#e8f1ff", tink: "#0b57c9", tagbg: "#1677ff", tagfg: "#ffffff" } },
+];
+const MODES = [
+  { k: "bar", name: "提示横条", desc: "第 1 轮的做法：订单顶部一张卡片写“由你的 AI 助手发起”。参照：外卖 App 的“准时宝”“免配送费”这类说明条。" },
+  { k: "daifu", name: "代付请求", desc: "付款这一步做成“AI 助手请你付款”，带一句它为什么要买。参照：淘宝“找人代付”、拼多多“帮我付”，国内用户都见过别人发来的代付请求。" },
+  { k: "hex", name: "六边形头像", desc: "AI 一律用六边形头像加“AI”角标，人用圆形头像。六边形呼应 hive 蜂巢，是 hive 自己的标识。参照：微信认证、淘宝旗舰店这类头像角标。" },
+];
+const S = { i: 3, mode: "daifu", focus: "honey", secs: 900, playing: false };
+const st = (n) => (S.i === 6 || n < S.i ? "done" : n === S.i ? "now" : "todo");
+const cd = () => `${String(Math.floor(S.secs / 60)).padStart(2, "0")}:${String(S.secs % 60).padStart(2, "0")}`;
+const style = (v) => Object.entries(v).map(([k, x]) => `--${k}:${x}`).join(";");
+
+const AI = "小蜂"; // the user's AI assistant, named so it reads like a person in Chinese UI
+function avatar(kind, letter, cls = "") {
+  if (kind === "ai" && S.mode === "hex") return `<span class="hexwrap"><span class="av hex ${cls}">${letter}</span><span class="ai">AI</span></span>`;
+  return `<span class="av circle ${cls}">${letter}</span>`;
+}
+
+function screen(i) {
+  const m = S.mode;
+  const headTitle = m === "daifu" && i === 3 ? `${AI}请你付款` : HEAD[i];
+  const sub = [
+    "正在提交", "正在为你匹配卖家，通常几秒钟", "马上生成付款入口",
+    `剩余 <b class="cd tnum">${cd()}</b>，超时自动取消`, "已付款，付款后不能取消", "卖家已交付，请确认收货", "钱已到卖家支付宝",
+  ][i];
+  const bar = [
+    `<span class="tip">付款前可随时取消</span><button class="a-btn" type="button">取消订单</button>`,
+    `<span class="tip">付款前可随时取消</span><button class="a-btn" type="button">取消订单</button>`,
+    `<span class="tip">付款前可随时取消</span><button class="a-btn" type="button">取消订单</button>`,
+    `<button class="a-btn" type="button">${m === "daifu" ? "不付了" : "取消订单"}</button><button class="a-btn pay" type="button" data-act="pay">${m === "daifu" ? "帮它付款" : "去支付宝付款"} ¥5.00</button>`,
+    `<span class="tip">卖家正在干活，交付后通知你</span><button class="a-btn" type="button">联系卖家</button>`,
+    `<button class="a-btn" type="button">拒收</button><button class="a-btn pri" type="button" data-act="accept">确认收货</button>`,
+    `<button class="a-btn" type="button">评价</button><button class="a-btn pri" type="button" data-act="again">再来一单</button>`,
+  ][i];
+  const pct = (Math.min(i, 6) / 6) * 86;
+
+  const headAv = m === "hex" ? `<span class="hexwrap"><span class="av hex sm on-top">蜂</span></span>` : "";
+  let agentBlock = "";
+  if (m === "bar") agentBlock = `<div class="a-card a-agent">${avatar("ai", "蜂")}<div>由你的 AI 助手「${AI}」发起<small>${AI}负责下单和验收，每笔付款都要你在支付宝确认</small></div></div>`;
+  if (m === "daifu" && i === 3) agentBlock = `<div class="df">
+      <div class="df-who">${avatar("ai", "蜂")}<div><b>${AI}请你帮它付款</b><small>你的 AI 助手 · 14:02</small></div></div>
+      <div class="df-msg">我在帮你做奶茶店选址。先买一份湖滨、武林、滨江三个商圈的竞品门店数据，看看哪里竞争小。</div>
+      <div class="df-amt"><div class="k">需付款</div><div class="v"><small>¥</small>5.00</div></div>
+      <div class="df-ft"><span>钱直接付给卖家，hive 不经手</span><span>剩余 <span class="cd tnum">${cd()}</span></span></div></div>`;
+
+  const by = m === "bar" ? "" : `<div class="a-by">${m === "hex" ? avatar("ai", "蜂", "sm") : ""}下单人 <b>${AI}（你的 AI 助手）</b></div>`;
+
+  return `<div class="sA">
+    <div class="a-top">
+      <div class="a-nav"><span>‹</span><b>订单详情</b><span>···</span></div>
+      <div class="a-head">${headAv}<div><div class="a-big">${headTitle}</div><div class="a-sub">${m === "daifu" && i === 3 ? "看看它要买什么，没问题就付款" : sub}</div></div></div>
+    </div>
+    <div class="a-body">
+      ${agentBlock}
+      <div class="a-card"><div class="a-prog"><div class="bar" style="width:${pct}%"></div>
+        ${STAGES.map((s, n) => `<div class="a-step ${st(n)}"><i></i>${s}</div>`).join("")}</div></div>
+      <div class="a-card"><div class="a-item"><div class="a-thumb">竞品<br>数据</div>
+        <div><h3>竞品门店数据</h3><div class="a-chips"><span>杭州</span><span>奶茶</span>${AREAS.map((a) => `<span>${a}</span>`).join("")}</div></div>
+        <div class="a-price"><small>¥</small>5.00</div></div>${by}</div>
+      ${i >= 2 ? `<div class="a-card a-seller">${avatar("ai", "茶")}<div><div class="nm">茶饮数据通${m === "hex" ? "" : `<span class="a-tag">AI</span>`}</div><small>AI 卖家 · 通过率 98% · 已成交 1,243 单</small></div><span class="go">›</span></div>` : ""}
+      ${i >= 5 ? `<div class="a-card a-deliv"><h4>交付内容<span>✓ 格式校验通过</span></h4>
+        ${STORES.slice(0, 5).map((s) => `<div class="a-row"><span>${s.name} · ${s.area}</span><em>${s.rating} 分 · 人均 ¥${s.price}</em></div>`).join("")}
+        <div class="a-row"><em>共 ${STORES.length} 家门店</em><em>查看全部 ›</em></div></div>` : ""}
+      <dl class="a-card a-meta"><dt>订单编号</dt><dd class="tnum">H202610150042</dd><dt>下单时间</dt><dd class="tnum">2026-10-15 14:02</dd><dt>付款方式</dt><dd>支付宝 · 钱直接给卖家</dd></dl>
+    </div>
+    <div class="a-bar">${bar}</div>
+  </div>`;
+}
+
+const $ = (s) => document.querySelector(s);
+function build() {
+  $("#modes").innerHTML = MODES.map((m) => `<button type="button" data-mode="${m.k}">${m.name}</button>`).join("");
+  $("#stages").innerHTML = STAGES.map((s, n) => `<button type="button" data-stage="${n}">${s}</button>`).join("");
+  $("#tabs").innerHTML = PALETTES.map((p) => `<button type="button" data-tab="${p.k}">${p.name.replace("（对照）", "")}</button>`).join("");
+  $("#frames").innerHTML = PALETTES.map((p) => `<section class="spec" data-spec="${p.k}">
+    <div class="spec-meta"><span class="sw" style="background:${p.v.main}"></span><div><b>${p.name}</b><p>${p.note}</p></div></div>
+    <div class="phone"><div class="screen" id="scr-${p.k}" style="${style(p.v)}"></div></div></section>`).join("");
+}
+function render() {
+  const html = screen(S.i);
+  PALETTES.forEach((p) => ($("#scr-" + p.k).innerHTML = html));
+  $("#mdesc").textContent = MODES.find((m) => m.k === S.mode).desc;
+  document.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("on", b.dataset.mode === S.mode));
+  document.querySelectorAll("[data-stage]").forEach((b) => b.classList.toggle("on", +b.dataset.stage === S.i));
+  document.querySelectorAll("[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === S.focus));
+  document.querySelectorAll("[data-spec]").forEach((b) => b.classList.toggle("focus", b.dataset.spec === S.focus));
+  $("#play").classList.toggle("on", S.playing);
+  $("#play").textContent = S.playing ? "演示中…" : "自动演示";
+}
+function go(n) { if (n === 3 && S.i !== 3) S.secs = 900; S.i = n; render(); }
+document.addEventListener("click", (e) => {
+  const t = e.target.closest("[data-act],[data-stage],[data-tab],[data-mode],#play");
+  if (!t) return;
+  if (t.id === "play") { S.playing = !S.playing; if (S.playing && S.i === 6) go(0); else render(); return; }
+  if (t.dataset.mode) { S.mode = t.dataset.mode; render(); return; }
+  if (t.dataset.stage) { S.playing = false; go(+t.dataset.stage); return; }
+  if (t.dataset.tab) { S.focus = t.dataset.tab; render(); return; }
+  ({ pay: () => go(4), accept: () => go(6), again: () => go(0) })[t.dataset.act]?.();
+});
+setInterval(() => { if (S.i === 3 && S.secs > 0) { S.secs--; document.querySelectorAll(".cd").forEach((el) => (el.textContent = cd())); } }, 1000);
+setInterval(() => {
+  if (!S.playing) return;
+  if ([0, 1, 2, 4].includes(S.i)) go(S.i + 1);
+  else if (S.i === 6) { S.playing = false; render(); }
+}, 1600);
+build();
+render();
+</script>
