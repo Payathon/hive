@@ -107,6 +107,7 @@ describe("remote MCP", () => {
     const list = await (await rpc(t.app, key, "tools/list")).json();
     const names = list.result.tools.map((x: { name: string }) => x.name);
     expect(names).toContain("hive_order");
+    expect(names).toContain("hive_deliver");
     expect(names).not.toContain("hive_login");
     const me = await (await rpc(t.app, key, "tools/call", { name: "hive_whoami", arguments: {} })).json();
     expect(JSON.parse(me.result.content[0].text)).toMatchObject({ name: "alice", actor: "agent" });

@@ -36,10 +36,11 @@ async function env() {
   return { ...server, mcp, call };
 }
 
-async function listeningSeller(base: string, token: string) {
+// Without a run command the seller delivers by hand, here through its agent over MCP.
+async function listeningSeller(base: string, token: string, run: string | null = `printf '%s' '${JSON.stringify(good)}'`) {
   const listener = new Listener(
     new HiveClient(base, token),
-    [{ type: "market-data.competitors", accept: "auto", daily_limit: 10, run: `printf '%s' '${JSON.stringify(good)}'` }],
+    [{ type: "market-data.competitors", accept: "auto", daily_limit: 10, ...(run ? { run } : {}) }],
     () => {},
     1,
   );
@@ -91,4 +92,34 @@ it("logs in through the owner and buys an order end to end", async () => {
   expect(delivered.text).toContain("DELIVERED");
   expect(delivered.text).toContain("hive_accept");
   expect((await t.call("hive_accept", { order_id: id })).text).toContain("COMPLETED");
+});
+
+it("lets the seller's agent read a paid order and deliver it", async () => {
+  const t = await env();
+  const sellerToken = await t.signup("seller");
+  await listeningSeller(t.base, sellerToken, null);
+  const code = /\/approve\?code=([A-F0-9]{8})/.exec((await t.call("hive_login")).text)?.[1];
+  await new HiveClient(t.base, sellerToken).request("POST", "/v1/device-logins/approve", { userCode: code });
+
+  const buyer = new HiveClient(t.base, await t.signup("buyer"));
+  let order = await buyer.createOrder("market-data.competitors", input);
+  for (let i = 0; i < 50 && order.status !== "AWAITING_PAYMENT"; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    order = await buyer.order(order.id);
+  }
+  await t.pay(order.purchaseUrl!);
+  expect((await buyer.orderAction(order.id, "check-payment")).status).toBe("PAID");
+
+  expect((await t.call("hive_seller_orders")).text).toContain(order.id);
+  const work = await t.call("hive_seller_order", { order_id: order.id });
+  expect(work.text).toContain("<buyer_input>");
+  expect(work.text).toContain("杭州");
+
+  const bad = await t.call("hive_deliver", { order_id: order.id, output: { wrong: true } });
+  expect(bad.isError).toBe(true);
+  expect(bad.text).toMatch(/invalid_output[\s\S]*hive_deliver again/);
+
+  expect((await t.call("hive_deliver", { order_id: order.id, output: good })).text).toContain("delivered");
+  expect((await buyer.order(order.id)).status).toBe("DELIVERED");
+  expect((await t.call("hive_seller_orders")).text).toBe("nothing to deliver right now");
 });
