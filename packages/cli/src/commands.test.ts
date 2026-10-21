@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,12 +7,17 @@ import { promisify } from "node:util";
 import { afterEach, expect, it } from "vitest";
 import { HiveClient } from "@hive/client/api";
 import { Listener } from "./listener.ts";
-import { startTestServer } from "./test-server.ts";
+import { competitorOrder, competitorSchema, startTestServer } from "./test-server.ts";
 
 const exec = promisify(execFile);
 const main = fileURLToPath(new URL("./main.ts", import.meta.url));
 const good = JSON.stringify({ stores: [{ name: "一点点", area: "湖滨", address: "平海路 1 号" }], source: "seed" });
-const orderArgs = ["order", "market-data.competitors", "--input", JSON.stringify({ city: "杭州", areas: ["湖滨"], category: "奶茶" })];
+const orderArgs = [
+  "order", "data.market",
+  "--brief", "杭州湖滨的奶茶竞品门店",
+  "--input", JSON.stringify({ city: "杭州", areas: ["湖滨"], category: "奶茶" }),
+  "--schema", JSON.stringify(competitorSchema),
+];
 
 const cleanups: (() => unknown)[] = [];
 afterEach(async () => {
@@ -37,7 +42,7 @@ async function env() {
 async function listeningSeller(base: string, token: string) {
   const listener = new Listener(
     new HiveClient(base, token),
-    [{ type: "market-data.competitors", accept: "auto", daily_limit: 10, run: `printf '%s' '${good}'` }],
+    [{ category: "data.market", tags: [], accept: "auto", daily_limit: 10, run: `printf '%s' '${good}'` }],
     () => {},
     1,
   );
@@ -80,6 +85,7 @@ it("order waits for an agent seller and returns the payment link", async () => {
   const order = JSON.parse(out.stdout);
   expect(order.status).toBe("AWAITING_PAYMENT");
   expect(order.purchaseUrl).toContain("/v1/dev/fake-pay/");
+  expect(order.deliverySpec).toEqual({ kind: "json", schema: competitorSchema });
 });
 
 it("status --wait stops when payment is needed instead of running past it", async () => {
@@ -88,9 +94,39 @@ it("status --wait stops when payment is needed instead of running past it", asyn
   const buyer = new HiveClient(t.base, buyerToken);
   await listeningSeller(t.base, await t.signup("seller"));
   // Raw API create returns while still OFFERED; status --wait has to carry it to the payment step.
-  const created = await buyer.createOrder("market-data.competitors", { city: "杭州", areas: ["湖滨"], category: "奶茶" });
+  const created = await buyer.createOrder(competitorOrder);
   const out = await exec(process.execPath, ["--import", "tsx", main, "status", created.id, "--wait", "--json"], {
     env: { ...process.env, HIVE_HOME: await mkdtemp(join(tmpdir(), "hive-cli-")), HIVE_SERVER: t.base, HIVE_TOKEN: buyerToken },
   });
   expect(JSON.parse(out.stdout).status).toBe("AWAITING_PAYMENT");
+});
+
+it("download saves the delivery's files and data", async () => {
+  const t = await env();
+  const sellerToken = await t.signup("seller");
+  const listener = new Listener(
+    new HiveClient(t.base, sellerToken),
+    [{ category: "design.chart", tags: [], accept: "auto", daily_limit: 10, run: `printf '<svg/>' > "$HIVE_OUTPUT_DIR/chart.svg"; echo '{"rows":2}'` }],
+    () => {},
+  );
+  await listener.sync();
+  await listener.pollOnce(0);
+  const buyerToken = await t.signup("buyer");
+  const buyer = new HiveClient(t.base, buyerToken);
+  const order = await buyer.createOrder({ category: "design.chart", brief: "a chart", delivery: { kind: "files", accept: "image/svg+xml" } });
+  await listener.pollOnce(0);
+  await t.pay((await buyer.order(order.id)).purchaseUrl!);
+  await buyer.orderAction(order.id, "check-payment");
+  await listener.pollOnce(0);
+  await listener.drain();
+
+  const out = await mkdtemp(join(tmpdir(), "hive-dl-"));
+  const run = (...args: string[]) =>
+    exec(process.execPath, ["--import", "tsx", main, ...args], {
+      env: { ...process.env, HIVE_HOME: out, HIVE_SERVER: t.base, HIVE_TOKEN: buyerToken },
+    });
+  expect((await run("status", order.id)).stdout).toMatch(/chart\.svg\s+image\/svg\+xml\s+6 bytes\s+http:\/\/127\.0\.0\.1:\d+\/v1\/files\/file_/);
+  await run("download", order.id, "--out", join(out, "got"));
+  expect(await readFile(join(out, "got", "chart.svg"), "utf8")).toBe("<svg/>");
+  expect(JSON.parse(await readFile(join(out, "got", "data.json"), "utf8"))).toEqual({ rows: 2 });
 });

@@ -1,8 +1,16 @@
-// Seed seller for chart.compare: renders a bar chart of the first numeric column as an SVG data URL.
-import { readBuyerInput } from "./task-input.mjs";
+// Seed seller for design.chart: draws a bar chart of the first numeric column as an SVG file
+// in $HIVE_OUTPUT_DIR and replies with a caption. The rows come as input.data, or as the input itself.
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { readBuyerRequest } from "./task-input.mjs";
 
-const input = readBuyerInput();
-const rows = input.data;
+const { brief, input } = readBuyerRequest();
+const rows = Array.isArray(input) ? input : input.data;
+if (!Array.isArray(rows) || rows.length === 0) {
+  console.error("this seller needs the rows to chart in input.data, e.g. [{\"商圈\":\"湖滨\",\"门店数\":12}]");
+  process.exit(1);
+}
+const title = input.title ?? (brief.slice(0, 30) || "对比图");
 const labelKey = Object.keys(rows[0]).find((k) => typeof rows[0][k] === "string") ?? Object.keys(rows[0])[0];
 const valueKey = Object.keys(rows[0]).find((k) => typeof rows[0][k] === "number");
 const values = rows.map((r) => (valueKey ? Number(r[valueKey]) : 1));
@@ -19,8 +27,6 @@ const bars = rows
   })
   .join("");
 const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}"><rect width="100%" height="100%" fill="#fff"/>` +
-  `<text x="${W / 2}" y="28" font-size="16" text-anchor="middle">${esc(input.title)}</text>${bars}</svg>`;
-console.log(JSON.stringify({
-  imageUrl: `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`,
-  caption: `${input.title}${valueKey ? `（按 ${valueKey}）` : ""}`,
-}));
+  `<text x="${W / 2}" y="28" font-size="16" text-anchor="middle">${esc(title)}</text>${bars}</svg>`;
+writeFileSync(join(process.env.HIVE_OUTPUT_DIR ?? ".", "chart.svg"), svg);
+console.log(`${title}${valueKey ? `（按 ${valueKey}）` : ""}`);

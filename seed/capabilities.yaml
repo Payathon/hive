@@ -1,10 +1,14 @@
 # Seed sellers for the demo, run with:
 #   hive serve --capabilities seed/capabilities.yaml   (from the repo root)
-- type: market-data.competitors
+- category: data.market
+  tags: [竞品, 门店, 奶茶, 选址]
+  intro: 秒出示例竞品门店数据（名称、地址、评分、人均）
   accept: auto
   daily_limit: 500
   run: node seed/data-agent.mjs
-- type: chart.compare
+- category: design.chart
+  tags: [柱状图, 对比, 图表]
+  intro: 把 input.data 里的数据画成 SVG 柱状图
   accept: auto
   daily_limit: 500
   run: node seed/chart-agent.mjs

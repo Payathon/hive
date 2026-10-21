@@ -1,6 +1,7 @@
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { ApiError, HiveClient, yuan, type Order } from "@hive/client/api";
+import { ApiError, HiveClient, yuan, type DeliverySpec, type Order } from "@hive/client/api";
 import { describe, paymentPrompt, placeOrder, waitForCaller, waitForPayment } from "@hive/client/buyer";
 import { loadCapabilities } from "./capabilities-file.ts";
 import { hiveHome, loadConfig, saveConfig } from "./config.ts";
@@ -18,10 +19,14 @@ Account
   hive whoami
 
 Buying
-  hive types                         capability types and their schemas
-  hive order <type> --input <json>   post a task; waits for a seller, prints the payment link
+  hive categories                    categories and who sells in each
+  hive order <category> --brief <text> [--input <json>] [--schema <json|@file> | --files <mime>[:count]]
+                                     post a task; waits for a seller, prints the payment link.
+                                     --schema: deliver JSON matching it; --files: deliver files
+                                     (e.g. image/*:3); neither: any format
   hive pay <order> [--wait]          show the Alipay link; --wait until paid
   hive status <order> [--wait]       --wait until payment is needed, delivered, or finished
+  hive download <order> [--out <dir>] save the delivery's files (and data.json) to a directory
   hive accept <order> | hive reject <order>
   hive cancel <order>                only before payment
   hive orders [--seller]             recent orders
@@ -42,6 +47,10 @@ async function main(argv: string[]) {
     allowPositionals: true,
     options: {
       input: { type: "string" },
+      brief: { type: "string" },
+      schema: { type: "string" },
+      files: { type: "string" },
+      out: { type: "string" },
       server: { type: "string" },
       capabilities: { type: "string" },
       wait: { type: "boolean" },
@@ -58,6 +67,7 @@ async function main(argv: string[]) {
 
   if (cmd !== "login" && cmd !== "signup") await completeLogin(config);
   const client = new HiveClient(config.server, config.token);
+  const show = (o: Order) => describe(o, { base: config.server });
   const print = (o: unknown, text?: string) => console.log(values.json || !text ? JSON.stringify(o, null, 2) : text);
   const need = (what: string) => {
     if (!arg) throw new Error(`usage: hive ${cmd} <${what}>`);
@@ -98,46 +108,77 @@ async function main(argv: string[]) {
     case "whoami":
       return print(await client.me());
 
+    case "categories":
     case "types": {
-      const types = await client.types();
-      const line = (s: (typeof types)[number]["sellers"][number]) =>
-        `  ${yuan(s.priceFen)}  ${s.workStyle}${s.online ? "" : "（离线）"}  ${s.name}`;
-      return print(types, types.map((t) => [`${t.type}  ${t.title}`, ...t.sellers.map(line)].join("\n")).join("\n"));
+      const cats = await client.categories();
+      const line = (s: (typeof cats)[number]["sellers"][number]) =>
+        `  ${yuan(s.priceFen)}  ${s.workStyle}${s.online ? "" : "（离线）"}  ${s.name}${s.tags.length ? `  #${s.tags.join(" #")}` : ""}`;
+      return print(cats, cats.map((c) => [`${c.id}  ${c.title}  ${c.blurb}`, ...c.sellers.map(line)].join("\n")).join("\n"));
     }
 
     case "order": {
-      if (!values.input) throw new Error("usage: hive order <type> --input '<json>'");
-      const order = await placeOrder(client, need("type"), JSON.parse(values.input), Date.now() + ORDER_WAIT_MS);
-      return print(order, describe(order));
+      if (!values.brief) throw new Error("usage: hive order <category> --brief '<what you need>' [--input '<json>'] [--schema … | --files …]");
+      const order = await placeOrder(
+        client,
+        {
+          category: need("category"),
+          brief: values.brief,
+          ...(values.input ? { input: JSON.parse(values.input) } : {}),
+          delivery: await deliveryFlag(values.schema, values.files),
+        },
+        Date.now() + ORDER_WAIT_MS,
+      );
+      return print(order, show(order));
     }
 
     case "pay": {
       let order = await client.order(need("order"));
       if (order.status === "AWAITING_PAYMENT") console.log(paymentPrompt(order));
       if (values.wait) order = await waitForPayment(client, order, Infinity);
-      return print(order, describe(order));
+      return print(order, show(order));
     }
 
     case "status": {
       let order = await client.order(need("order"));
       if (values.wait) order = await waitForCaller(client, order, Infinity);
-      return print(order, describe(order));
+      return print(order, show(order));
+    }
+
+    case "download": {
+      const order = await client.order(need("order"));
+      if (!order.output) throw new Error(`${order.id} has no delivery yet (${order.status})`);
+      const dir = values.out ?? order.id;
+      await mkdir(dir, { recursive: true });
+      const saved: string[] = [];
+      for (const f of order.output.files) {
+        const res = await fetch(client.fileUrl(f));
+        if (!res.ok) throw new Error(`download of ${f.name} failed: ${res.status}`);
+        const path = join(dir, f.name.replace(/[\\/]/g, "_"));
+        await writeFile(path, new Uint8Array(await res.arrayBuffer()));
+        saved.push(path);
+      }
+      if (order.output.data !== null) {
+        await writeFile(join(dir, "data.json"), JSON.stringify(order.output.data, null, 2));
+        saved.push(join(dir, "data.json"));
+      }
+      if (order.output.note) console.log(`note: ${order.output.note}`);
+      return print(saved, saved.length ? `saved:\n${saved.map((p) => `  ${p}`).join("\n")}` : "nothing to save: the delivery is a note only");
     }
 
     case "accept":
     case "reject": {
       const order = await client.orderAction(need("order"), "verdict", { verdict: cmd === "accept" ? "accepted" : "rejected" });
-      return print(order, describe(order));
+      return print(order, show(order));
     }
 
     case "cancel": {
       const order = await client.orderAction(need("order"), "cancel");
-      return print(order, describe(order));
+      return print(order, show(order));
     }
 
     case "orders": {
       const orders = await client.request<Order[]>("GET", `/v1/orders?role=${values.seller ? "seller" : "buyer"}`);
-      return print(orders, orders.map((o) => `${o.id}  ${o.status.padEnd(16)} ${o.capabilityType}  ${yuan(o.priceFen)}`).join("\n"));
+      return print(orders, orders.map((o) => `${o.id}  ${o.status.padEnd(16)} ${o.category}  ${yuan(o.priceFen)}  ${o.brief.slice(0, 40)}`).join("\n"));
     }
 
     case "bill": {
@@ -158,6 +199,17 @@ async function main(argv: string[]) {
     default:
       throw new Error(`unknown command ${cmd}\n\n${HELP}`);
   }
+}
+
+// --schema '<json>' or @file asks for JSON; --files 'image/*:3' for files; neither for any format.
+async function deliveryFlag(schema: string | undefined, files: string | undefined): Promise<DeliverySpec> {
+  if (schema && files) throw new Error("pass --schema or --files, not both");
+  if (schema) return { kind: "json", schema: JSON.parse(schema.startsWith("@") ? await readFile(schema.slice(1), "utf8") : schema) };
+  if (files) {
+    const [accept, count] = files.split(":");
+    return { kind: "files", ...(accept && accept !== "*" ? { accept } : {}), ...(count ? { count: Number(count) } : {}) };
+  }
+  return { kind: "any" };
 }
 
 main(process.argv.slice(2)).catch((err) => {

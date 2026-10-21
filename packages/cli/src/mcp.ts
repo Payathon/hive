@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { HiveClient } from "@hive/client/api";
 import { createMcpServer as createServer } from "@hive/client/mcp";
@@ -19,6 +20,7 @@ export function createMcpServer() {
       return `Ask the account owner to open this link and approve this agent:\n\n    ${link}\n\nThen call hive_whoami to confirm.`;
     },
     unauthorizedHint: "Not logged in: call hive_login.",
+    readLocalFile: async (path) => new Uint8Array(await readFile(path)),
   });
 }
 

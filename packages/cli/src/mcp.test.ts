@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -7,10 +7,9 @@ import { afterEach, expect, it } from "vitest";
 import { HiveClient } from "@hive/client/api";
 import { Listener } from "./listener.ts";
 import { createMcpServer } from "./mcp.ts";
-import { startTestServer } from "./test-server.ts";
+import { competitorOrder, startTestServer } from "./test-server.ts";
 
 const good = { stores: [{ name: "一点点", area: "湖滨", address: "平海路 1 号" }], source: "seed" };
-const input = { city: "杭州", areas: ["湖滨"], category: "奶茶" };
 
 const cleanups: (() => unknown)[] = [];
 afterEach(async () => {
@@ -40,7 +39,7 @@ async function env() {
 async function listeningSeller(base: string, token: string, run: string | null = `printf '%s' '${JSON.stringify(good)}'`) {
   const listener = new Listener(
     new HiveClient(base, token),
-    [{ type: "market-data.competitors", accept: "auto", daily_limit: 10, ...(run ? { run } : { delivery_hours: 2 }) }],
+    [{ category: "data.market", tags: [], accept: "auto", daily_limit: 10, ...(run ? { run } : { delivery_hours: 2 }) }],
     () => {},
     1,
   );
@@ -81,7 +80,7 @@ it("logs in through the owner and buys an order end to end", async () => {
   await new HiveClient(t.base, ownerToken).request("POST", "/v1/device-logins/approve", { userCode: code });
   expect(JSON.parse((await t.call("hive_whoami")).text).actor).toBe("agent");
 
-  const ordered = await t.call("hive_order", { type: "market-data.competitors", input });
+  const ordered = await t.call("hive_order", competitorOrder);
   expect(ordered.text).toContain("AWAITING_PAYMENT");
   const id = ordered.text.split(/\s+/)[0]!;
   const url = /^\s+(http\S+)$/m.exec(ordered.text)![1]!;
@@ -102,7 +101,7 @@ it("lets the seller's agent read a paid order and deliver it", async () => {
   await new HiveClient(t.base, sellerToken).request("POST", "/v1/device-logins/approve", { userCode: code });
 
   const buyer = new HiveClient(t.base, await t.signup("buyer"));
-  let order = await buyer.createOrder("market-data.competitors", input);
+  let order = await buyer.createOrder(competitorOrder);
   for (let i = 0; i < 50 && order.status !== "AWAITING_PAYMENT"; i++) {
     await new Promise((r) => setTimeout(r, 100));
     order = await buyer.order(order.id);
@@ -115,11 +114,19 @@ it("lets the seller's agent read a paid order and deliver it", async () => {
   expect(work.text).toContain("<buyer_input>");
   expect(work.text).toContain("杭州");
 
-  const bad = await t.call("hive_deliver", { order_id: order.id, output: { wrong: true } });
+  expect(work.text).toContain('"minItems":1');
+
+  const bad = await t.call("hive_deliver", { order_id: order.id, data: { wrong: true } });
   expect(bad.isError).toBe(true);
   expect(bad.text).toMatch(/invalid_output[\s\S]*hive_deliver again/);
 
-  expect((await t.call("hive_deliver", { order_id: order.id, output: good })).text).toContain("delivered");
-  expect((await buyer.order(order.id)).status).toBe("DELIVERED");
+  // A local file by path rides along with the data.
+  const photo = join(process.env.HIVE_HOME!, "shop.jpg");
+  await writeFile(photo, "jpeg");
+  expect((await t.call("hive_deliver", { order_id: order.id, data: good, files: [{ path: photo }] })).text).toContain("delivered");
+  const delivered = await buyer.order(order.id);
+  expect(delivered.output!.files.map((f) => [f.name, f.mime])).toEqual([["shop.jpg", "image/jpeg"]]);
+  expect((await t.call("hive_status", { order_id: order.id })).text).toMatch(/shop\.jpg\s+image\/jpeg\s+4 bytes\s+http/);
+  expect(delivered.status).toBe("DELIVERED");
   expect((await t.call("hive_seller_orders")).text).toBe("nothing to deliver right now");
 });

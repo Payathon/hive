@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { HiveClient } from "@hive/client/api";
 import { Listener } from "./listener.ts";
-import { startTestServer } from "./test-server.ts";
+import { competitorOrder, startTestServer } from "./test-server.ts";
 
-const DATA = "market-data.competitors";
-const input = { city: "杭州", areas: ["湖滨"], category: "奶茶" };
+const DATA = "data.market";
 const good = JSON.stringify({ stores: [{ name: "一点点", area: "湖滨", address: "平海路 1 号" }], source: "seed" });
 
 let stop: (() => void) | undefined;
@@ -23,7 +22,7 @@ async function sellerWith(run: string | undefined) {
   const logs: string[] = [];
   const listener = new Listener(
     new HiveClient(env.base, sellerToken),
-    [{ type: DATA, accept: "auto", daily_limit: 10, ...(run ? { run } : { delivery_hours: 2 }) }],
+    [{ category: DATA, tags: [], accept: "auto", daily_limit: 10, ...(run ? { run } : { delivery_hours: 2 }) }],
     (m) => logs.push(m),
   );
   await listener.sync();
@@ -33,8 +32,8 @@ async function sellerWith(run: string | undefined) {
 }
 
 // Drives one order: offer -> auto-accept -> buyer pays -> listener works.
-async function runOrder(t: Awaited<ReturnType<typeof sellerWith>>) {
-  const created = await t.buyer.createOrder(DATA, input);
+async function runOrder(t: Awaited<ReturnType<typeof sellerWith>>, order: Parameters<HiveClient["createOrder"]>[0] = competitorOrder) {
+  const created = await t.buyer.createOrder(order);
   await t.listener.pollOnce(0);
   const accepted = await t.buyer.order(created.id);
   expect(accepted.status).toBe("AWAITING_PAYMENT");
@@ -55,10 +54,23 @@ describe("hive serve", () => {
     const t = await sellerWith(`printf '%s' '${good}'`);
     const done = await runOrder(t);
     expect(done.status).toBe("DELIVERED");
-    expect(done.output).toEqual(JSON.parse(good));
+    expect(done.output).toEqual({ note: null, data: JSON.parse(good), files: [] });
   });
 
-  it("retries with the schema error until the output is valid", async () => {
+  it("uploads the files the command leaves in $HIVE_OUTPUT_DIR, with its reply as the note", async () => {
+    const t = await sellerWith(`printf 'svg' > "$HIVE_OUTPUT_DIR/chart.svg"; printf 'x' > "$HIVE_OUTPUT_DIR/b.png"; echo 'two images'`);
+    const done = await runOrder(t, { category: DATA, brief: "two images", delivery: { kind: "files", accept: "image/*", count: 2 } });
+    expect(done.status).toBe("DELIVERED");
+    expect(done.output!.note).toBe("two images");
+    expect(done.output!.files.map((f) => [f.name, f.mime, f.size])).toEqual([
+      ["b.png", "image/png", 1],
+      ["chart.svg", "image/svg+xml", 3],
+    ]);
+    const res = await fetch(t.buyer.fileUrl(done.output!.files[1]!));
+    expect(await res.text()).toBe("svg");
+  });
+
+  it("retries with the format error until the delivery fits", async () => {
     // First run prints junk-shaped JSON, the second prints the real thing.
     const counter = `${process.env.TMPDIR ?? "/tmp"}/hive-attempt-${Date.now()}`;
     const t = await sellerWith(

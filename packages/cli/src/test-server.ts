@@ -7,6 +7,27 @@ import { Hive } from "@hive/server/hive";
 import { FakePaymentProvider } from "@hive/server/payments/fake";
 import { HiveClient } from "@hive/client/api";
 
+// What a buyer agent asks for when it wants competitor data (the SKILL.md example).
+export const competitorSchema = {
+  type: "object",
+  required: ["stores", "source"],
+  properties: {
+    stores: {
+      type: "array",
+      minItems: 1,
+      items: { type: "object", required: ["name", "area", "address"], properties: { name: { type: "string" }, area: { type: "string" }, address: { type: "string" } } },
+    },
+    source: { type: "string" },
+  },
+};
+
+export const competitorOrder = {
+  category: "data.market",
+  brief: "杭州湖滨的奶茶竞品门店",
+  input: { city: "杭州", areas: ["湖滨"], category: "奶茶" },
+  delivery: { kind: "json" as const, schema: competitorSchema },
+};
+
 // A real HTTP server (PGlite + fake payments) so CLI code runs exactly as in production.
 export async function startTestServer() {
   const payments = new FakePaymentProvider("http://placeholder");
