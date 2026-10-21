@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { hive, setToken } from "../api.ts";
 import { useAction } from "../ui.tsx";
@@ -11,6 +11,16 @@ export function Welcome() {
   const [name, setName] = useState("");
   const [token, setTokenInput] = useState("");
   const { busy, run } = useAction();
+
+  // A login link (`/welcome#token=…`, printed by seed/demo.mjs) signs straight in. The token rides
+  // in the fragment so it never reaches the server's logs.
+  useEffect(() => {
+    const t = new URLSearchParams(location.hash.slice(1)).get("token");
+    if (!t) return;
+    history.replaceState(null, "", location.pathname + location.search);
+    setToken(t);
+    void run(() => hive.me()).then((me) => (me ? navigate(next, { replace: true }) : setToken(null)));
+  }, []);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
