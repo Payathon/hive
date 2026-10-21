@@ -44,7 +44,9 @@ export function readReply(stdout: string, spec: DeliverySpec): { note: string | 
   let reply = stdout.trim();
   const whole = tryJson(reply);
   if (isClaudeEnvelope(whole)) reply = whole.result.trim();
-  const data = tryJson(reply);
+  // A reply that is nothing but one fenced block is that block's content.
+  const fenced = /^```(?:json)?\s*([\s\S]*?)```$/.exec(reply);
+  const data = tryJson(fenced ? fenced[1]!.trim() : reply);
   if (data !== undefined && typeof data === "object" && data !== null) return { note: null, data };
   return { note: reply.slice(0, 10_000) || null, data: null };
 }

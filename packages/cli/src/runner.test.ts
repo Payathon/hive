@@ -28,6 +28,7 @@ describe("readReply", () => {
   it("keeps prose as the note for other formats, unwrapping claude's envelope", () => {
     expect(readReply('Done. {"a":1} was the input', { kind: "any" })).toEqual({ note: 'Done. {"a":1} was the input', data: null });
     expect(readReply('{"a":1}', { kind: "any" })).toEqual({ note: null, data: { a: 1 } });
+    expect(readReply('```json\n{"a":1}\n```', { kind: "any" })).toEqual({ note: null, data: { a: 1 } });
     expect(readReply(JSON.stringify({ type: "result", result: "3 photos saved" }), { kind: "files" })).toEqual({ note: "3 photos saved", data: null });
     expect(readReply("  ", { kind: "any" })).toEqual({ note: null, data: null });
   });

@@ -140,6 +140,8 @@ async function main(argv: string[]) {
 
     case "status": {
       let order = await client.order(need("order"));
+      // The owner may have just paid; ask Alipay now instead of waiting for the server's next sweep.
+      if (order.status === "AWAITING_PAYMENT") order = await client.orderAction(order.id, "check-payment");
       if (values.wait) order = await waitForCaller(client, order, Infinity);
       return print(order, show(order));
     }
