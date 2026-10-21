@@ -2,6 +2,7 @@ import { StrictMode, useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from "react-router";
 import { getToken, hive, setToken, type Me } from "./api.ts";
+import { setCategories } from "./format.ts";
 import { Approve } from "./pages/Approve.tsx";
 import { Buy } from "./pages/Buy.tsx";
 import { Desk } from "./pages/Desk.tsx";
@@ -23,7 +24,8 @@ function SignedIn() {
 
   const refresh = useCallback(async () => {
     try {
-      const m = await hive.me();
+      const [m, cats] = await Promise.all([hive.me(), hive.categories()]);
+      setCategories(cats);
       if (m.actor !== "human") {
         // An agent token works for the API but the web is for the owner.
         setToken(null);
@@ -57,7 +59,7 @@ function SignedIn() {
         <Route path="/" element={<Market />} />
         <Route path="/orders" element={<Orders />} />
         <Route path="/orders/:id" element={<OrderPage />} />
-        <Route path="/buy/:type" element={<Buy />} />
+        <Route path="/buy/:category" element={<Buy />} />
         <Route path="/desk" element={<Desk />} />
         <Route path="/me" element={<MePage />} />
         <Route path="/approve" element={<Approve />} />

@@ -1,8 +1,8 @@
-import { capabilityTypes, TIMEOUTS, workStyle } from "@hive/core";
+import { TIMEOUTS, workStyle } from "@hive/core";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, hive, type Listing, type OrderSummary } from "../api.ts";
-import { mmss, STATUS_LABEL, typeTitle, yuan } from "../format.ts";
+import { allCategories, category as categoryOf, mmss, specText, STATUS_LABEL, typeTitle, yuan } from "../format.ts";
 import { AgentIcon, TabBar, TypeTile, useAction, useNow, usePoll, useSession, useToast } from "../ui.tsx";
 
 const sleep = (ms: number, signal: AbortSignal) =>
@@ -11,12 +11,9 @@ const sleep = (ms: number, signal: AbortSignal) =>
     signal.addEventListener("abort", () => (clearTimeout(t), resolve()), { once: true });
   });
 
-function offerWhere(o: OrderSummary) {
-  const i = (o.input ?? {}) as Record<string, unknown>;
-  if (o.capabilityType === "photo.onsite") return `${i.location} · 拍 ${i.count} 张${i.subject}`;
-  if (o.capabilityType === "market-data.competitors") return `${i.city} ${(i.areas as string[]).join("、")} · ${i.category}`;
-  return String(i.title ?? "");
-}
+const offerWhere = (o: OrderSummary) => `${o.brief.length > 60 ? `${o.brief.slice(0, 60)}…` : o.brief} · 交付：${specText(o.deliverySpec)}`;
+
+const splitTags = (s: string) => [...new Set(s.split(/[,，、\s#]+/).map((x) => x.trim()).filter(Boolean))].slice(0, 10);
 
 // Long-polls like `hive serve` does, which also keeps this seller online. Only while the page is open.
 function useInbox(online: boolean) {
@@ -52,7 +49,7 @@ function OfferSheet({ offer, priceFen, onGrab, onSkip, busy }: { offer: OrderSum
         <div className="sheet-hd"><b>新派单 · 同时派给几位卖家，先抢先得</b></div>
         <div className="offer">
           <div className="tx">
-            <div className="nm">{typeTitle(offer.capabilityType)}</div>
+            <div className="nm">{typeTitle(offer.category)}</div>
             <div className="where">{offerWhere(offer)}</div>
             <div className="amt tnum"><small>¥</small>{yuan(priceFen)}</div>
           </div>
@@ -76,12 +73,16 @@ function OfferSheet({ offer, priceFen, onGrab, onSkip, busy }: { offer: OrderSum
 function Listings({ listings, reload }: { listings: Listing[] | null; reload: () => Promise<void> }) {
   const { busy, run } = useAction();
   const toast = useToast();
-  const listed = new Set(listings?.map((l) => l.capabilityType));
-  const unlisted = Object.keys(capabilityTypes).filter((t) => !listed.has(t));
+  const listed = new Set(listings?.map((l) => l.category));
+  const unlisted = allCategories().filter((c) => !listed.has(c.id)).map((c) => c.id);
   const [type, setType] = useState("");
   const [limit, setLimit] = useState("5");
   const [accept, setAccept] = useState<"ask" | "auto">("ask");
-  const [hours, setHours] = useState("2");
+  const [hours, setHours] = useState("");
+  const [tags, setTags] = useState("");
+  const [intro, setIntro] = useState("");
+  const chosen = categoryOf(type || unlisted[0] || "");
+  const usualHours = chosen ? Math.ceil(chosen.manualTimeoutMs / 3600_000) : 24;
 
   async function setup(t: string) {
     const r = await run(() => hive.paymentSetup(t));
@@ -94,34 +95,38 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
     e.preventDefault();
     const t = type || unlisted[0];
     if (!t) return;
-    if (!(await run(() => hive.upsertListing(t, { acceptMode: accept, deliveryHours: Number(hours), dailyLimit: Number(limit) })))) return;
+    const opts = { acceptMode: accept, deliveryHours: Number(hours) || usualHours, dailyLimit: Number(limit), tags: splitTags(tags), intro: intro.trim() || null };
+    if (!(await run(() => hive.upsertListing(t, opts)))) return;
     await setup(t);
     setType("");
+    setTags("");
+    setIntro("");
+    setHours("");
   }
 
   return (
     <div className="card">
-      <h4><span>我能接的能力</span><small>价格在支付宝收款页里设置</small></h4>
+      <h4><span>我能接的活</span><small>价格在支付宝收款页里设置</small></h4>
       {listings?.map((l) => (
         <div className="list-row" key={l.id}>
-          <TypeTile type={l.capabilityType} size={32} />
+          <TypeTile type={l.category} size={32} />
           <div className="tx">
-            <b>{typeTitle(l.capabilityType)}</b>
+            <b>{typeTitle(l.category)}</b>
             <span className="tag person">{workStyle(l)}</span>
-            <small>每天最多 {l.dailyLimit} 单</small>
+            <small>每天最多 {l.dailyLimit} 单{l.tags.length ? ` · ${l.tags.map((t) => `#${t}`).join(" ")}` : ""}</small>
           </div>
           <div className="r">
             {l.paymentStatus === "ENABLED" ? (
               <b className="tnum">¥{yuan(l.priceFen)}</b>
             ) : (
-              <button className="btn sm" type="button" disabled={busy} onClick={() => setup(l.capabilityType)}>设置收款</button>
+              <button className="btn sm" type="button" disabled={busy} onClick={() => setup(l.category)}>设置收款</button>
             )}
           </div>
         </div>
       ))}
       {unlisted.length > 0 && (
         <form className="list-row" onSubmit={add} style={{ flexWrap: "wrap" }}>
-          <select aria-label="能力" value={type || unlisted[0]} onChange={(e) => setType(e.target.value)} style={{ flex: 1, minWidth: 0, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }}>
+          <select aria-label="类目" value={type || unlisted[0]} onChange={(e) => setType(e.target.value)} style={{ flex: 1, minWidth: 0, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }}>
             {unlisted.map((t) => <option key={t} value={t}>{typeTitle(t)}</option>)}
           </select>
           <input aria-label="每天上限" type="number" min={1} max={100} value={limit} onChange={(e) => setLimit(e.target.value)} style={{ width: 64, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }} />
@@ -131,9 +136,11 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
               <option value="ask">每单我来审批</option>
               <option value="auto">自动接单</option>
             </select>
-            <input aria-label="几小时内交付" type="number" min={1} max={720} value={hours} onChange={(e) => setHours(e.target.value)} style={{ width: 56, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }} />
+            <input aria-label="几小时内交付" type="number" min={1} max={720} value={hours} placeholder={String(usualHours)} onChange={(e) => setHours(e.target.value)} style={{ width: 56, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }} />
             <span>小时内交付</span>
           </div>
+          <input aria-label="标签" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={`标签，空格隔开，例如 ${(chosen?.tags ?? []).slice(0, 3).join(" ") || "湖滨 门头"}`} style={{ width: "100%", marginTop: 8, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px", fontSize: 13 }} />
+          <input aria-label="一句介绍" value={intro} maxLength={200} onChange={(e) => setIntro(e.target.value)} placeholder="一句介绍，买家在市场里能看到" style={{ width: "100%", marginTop: 8, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px", fontSize: 13 }} />
         </form>
       )}
     </div>
@@ -211,8 +218,8 @@ export function Desk() {
             <h4>进行中</h4>
             {inbox.work.map((o) => (
               <Link className="list-row" key={o.id} to={`/orders/${o.id}`}>
-                <TypeTile type={o.capabilityType} size={32} />
-                <div className="tx"><b>{typeTitle(o.capabilityType)}</b><small>{offerWhere(o)}</small></div>
+                <TypeTile type={o.category} size={32} />
+                <div className="tx"><b>{typeTitle(o.category)}</b><small>{offerWhere(o)}</small></div>
                 <div className="r"><b className="tnum">¥{yuan(o.priceFen)}</b><small className="tone-go">{o.status === "PAID" ? "可以开始了" : STATUS_LABEL[o.status]}</small></div>
               </Link>
             ))}
@@ -222,7 +229,7 @@ export function Desk() {
         <Listings listings={listings} reload={reloadListings} />
       </div>
       <TabBar />
-      {offer && <OfferSheet offer={offer} priceFen={listings?.find((l) => l.capabilityType === offer.capabilityType)?.priceFen ?? null} busy={busy} onGrab={() => grab(offer)} onSkip={() => skip(offer)} />}
+      {offer && <OfferSheet offer={offer} priceFen={listings?.find((l) => l.category === offer.category)?.priceFen ?? null} busy={busy} onGrab={() => grab(offer)} onSkip={() => skip(offer)} />}
     </>
   );
 }

@@ -1,6 +1,7 @@
-import { ApiError, HiveClient, type Order } from "@hive/client/api";
+import { ApiError, HiveClient, type CategoryInfo, type DeliveredFile, type DeliveryRequest, type Order, type OrderRequest } from "@hive/client/api";
 
 export { ApiError };
+export type { CategoryInfo, DeliveredFile, DeliverySpec, MarketSeller } from "@hive/client/api";
 
 const TOKEN_KEY = "hive.token";
 
@@ -61,28 +62,9 @@ export interface AgentGrant {
   lastOrderAt: string | null;
 }
 
-export interface MarketSeller {
-  name: string;
-  acceptMode: "auto" | "ask";
-  workMode: "agent" | "manual";
-  // e.g. "agent 全自动", "需卖家审批 · 人工交付 · 2 小时内"
-  workStyle: string;
-  workTimeoutMs: number;
-  priceFen: number;
-  online: boolean;
-  passRate: number | null;
-  completed: number;
-}
-export interface MarketType {
-  type: string;
-  title: string;
-  workTimeoutMs: number;
-  sellers: MarketSeller[];
-}
-
 export interface BillEntry {
   orderId: string;
-  capabilityType: string;
+  category: string;
   priceFen: number | null;
   paidAt: string | null;
   createdByActor: "human" | "agent";
@@ -97,7 +79,9 @@ export interface Bill {
 
 export interface Listing {
   id: string;
-  capabilityType: string;
+  category: string;
+  tags: string[];
+  intro: string | null;
   acceptMode: "auto" | "ask";
   workMode: "agent" | "manual";
   deliveryHours: number | null;
@@ -120,10 +104,12 @@ const req = <T,>(method: string, path: string, body?: unknown, signal?: AbortSig
 export const hive = {
   signup: (name: string) => req<{ accountId: string; token: string }>("POST", "/v1/accounts", { name }),
   me: () => req<Me>("GET", "/v1/me"),
-  market: () => req<MarketType[]>("GET", "/v1/market"),
+  categories: () => req<CategoryInfo[]>("GET", "/v1/categories"),
   orders: (role: "buyer" | "seller") => req<OrderSummary[]>("GET", `/v1/orders?role=${role}`),
   order: (id: string) => req<OrderDetail>("GET", `/v1/orders/${id}`),
-  createOrder: (type: string, input: unknown) => req<OrderSummary>("POST", "/v1/orders", { type, input }),
+  createOrder: (order: OrderRequest) => req<OrderSummary>("POST", "/v1/orders", order),
+  upload: (orderId: string, file: File) => api().uploadFile(orderId, file.name, file.type, file) as Promise<DeliveredFile>,
+  deliver: (orderId: string, delivery: DeliveryRequest) => req<OrderSummary>("POST", `/v1/orders/${orderId}/deliver`, delivery),
   action: (id: string, action: string, body: unknown = {}) => req<OrderSummary>("POST", `/v1/orders/${id}/${action}`, body),
   bill: () => req<Bill>("GET", "/v1/me/bill"),
   updateRules: (rules: Partial<Me["rules"]>) => req<Me["rules"]>("PATCH", "/v1/me/rules", rules),
@@ -134,9 +120,11 @@ export const hive = {
   apiKey: (label: string) => req<{ key: string }>("POST", "/v1/api-keys", { label }),
   listings: () => req<Listing[]>("GET", "/v1/listings"),
   // Listed from the app, the work is always done by a person.
-  upsertListing: (type: string, opts: { acceptMode: "auto" | "ask"; deliveryHours: number; dailyLimit: number }) =>
-    req<Listing>("PUT", `/v1/listings/${type}`, { ...opts, workMode: "manual" }),
-  paymentSetup: (type: string) => req<PaymentSetup>("POST", `/v1/listings/${type}/payment-setup`, {}),
+  upsertListing: (
+    category: string,
+    opts: { acceptMode: "auto" | "ask"; deliveryHours: number; dailyLimit: number; tags: string[]; intro: string | null },
+  ) => req<Listing>("PUT", `/v1/listings/${category}`, { ...opts, workMode: "manual" }),
+  paymentSetup: (category: string) => req<PaymentSetup>("POST", `/v1/listings/${category}/payment-setup`, {}),
   setAccepting: (on: boolean) => req<{ accepting: boolean }>("POST", "/v1/seller/accepting", { on }),
   // Long-poll as the human 接单台 (not as a `hive serve` listener).
   poll: (waitSeconds: number, signal: AbortSignal) =>

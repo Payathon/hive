@@ -152,7 +152,7 @@ export function MePage() {
             .map((e) => (
               <Link className="list-row" key={e.orderId + e.sign} to={`/orders/${e.orderId}`}>
                 <div className="tx">
-                  <b>{typeTitle(e.capabilityType)}</b>
+                  <b>{typeTitle(e.category)}</b>
                   <small>{e.sign === "-" && e.createdByActor === "agent" ? "由 agent 发起，你确认 · " : ""}{e.paidAt ? shortDate(e.paidAt) : ""}</small>
                 </div>
                 <div className="r"><b className="tnum" style={{ color: e.sign === "+" ? "var(--ok)" : "var(--ink)" }}>{e.sign}{yuan(e.priceFen)}</b></div>

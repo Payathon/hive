@@ -25,11 +25,11 @@ export function Orders() {
               const sign = o.status === "COMPLETED" ? (role === "buyer" ? "-" : "+") : "";
               return (
                 <Link className="list-row" key={o.id} to={`/orders/${o.id}`}>
-                  <TypeTile type={o.capabilityType} size={36} />
+                  <TypeTile type={o.category} size={36} />
                   <div className="tx">
-                    <b>{typeTitle(o.capabilityType)}</b>
+                    <b>{typeTitle(o.category)}</b>
                     {o.createdByActor === "agent" && <span className="tag">{role === "buyer" ? "agent 发起" : "买家 agent"}</span>}
-                    <small className="tnum">{shortDate(o.createdAt)}</small>
+                    <small className="tnum">{shortDate(o.createdAt)}{o.brief ? ` · ${o.brief.slice(0, 24)}` : ""}</small>
                   </div>
                   <div className="r">
                     <b className="tnum">{o.priceFen === null ? "—" : `${sign}${yuan(o.priceFen)}`}</b>

@@ -5,8 +5,10 @@ import {
   CANCEL_REASON,
   dateTime,
   FAIL_REASON,
+  fileSize,
   isTerminal,
   mmss,
+  specText,
   STATUS_LABEL,
   statusTone,
   timeline,
@@ -58,62 +60,69 @@ function statusLine(o: OrderDetail, role: Role, now: number): string {
 }
 
 function inputRows(o: OrderDetail): Array<[string, ReactNode]> {
-  const i = (o.input ?? {}) as Record<string, unknown>;
-  if (o.capabilityType === "market-data.competitors")
-    return [["城市", String(i.city)], ["商圈", (i.areas as string[]).join("、")], ["品类", String(i.category)]];
-  if (o.capabilityType === "photo.onsite")
-    return [["地点", String(i.location)], ["拍什么", String(i.subject)], ["张数", `${i.count} 张`]];
-  if (o.capabilityType === "chart.compare") return [["图表", String(i.title)], ["数据", `${(i.data as unknown[]).length} 行`]];
-  return [["输入", <code>{JSON.stringify(i)}</code>]];
+  return [
+    ["要做什么", <span className="note">{o.brief}</span>],
+    ...(o.input !== null && o.input !== undefined ? [["附加数据", <code>{JSON.stringify(o.input)}</code>] as [string, ReactNode]] : []),
+    ["交付要求", specText(o.deliverySpec)],
+  ];
 }
 
-function Deliverable({ o }: { o: OrderDetail }) {
+type Store = { name: string; area?: string; address?: string; rating?: number; priceLevel?: number };
+
+// Competitor data gets a readable list; any other data is shown as JSON.
+function DataView({ data }: { data: unknown }) {
   const [all, setAll] = useState(false);
-  const out = o.output as Record<string, unknown> | null;
-  if (!out) return null;
-  if (o.capabilityType === "market-data.competitors") {
-    const stores = out.stores as Array<{ name: string; area: string; address: string; rating?: number; priceLevel?: number }>;
+  const stores = (data as { stores?: unknown } | null)?.stores;
+  if (Array.isArray(stores) && stores.every((s) => s && typeof s === "object" && "name" in s)) {
+    const list = stores as Store[];
     return (
-      <div className="card">
-        <h4><span>交付内容</span><small>{stores.length} 家门店 · 来源 {String(out.source)}</small></h4>
+      <>
         <div className="rows">
-          {(all ? stores : stores.slice(0, 5)).map((s, i) => (
+          {(all ? list : list.slice(0, 5)).map((s, i) => (
             <div className="row" key={i}>
-              <span>{s.name} · {s.area}<br /><small style={{ color: "var(--sub)" }}>{s.address}</small></span>
+              <span>{s.name}{s.area ? ` · ${s.area}` : ""}{s.address && <><br /><small style={{ color: "var(--sub)" }}>{s.address}</small></>}</span>
               <em className="tnum">{[s.rating != null && `${s.rating} 分`, s.priceLevel != null && `人均 ¥${s.priceLevel}`].filter(Boolean).join(" · ")}</em>
             </div>
           ))}
         </div>
-        {stores.length > 5 && (
+        {list.length > 5 && (
           <button className="link blue" type="button" style={{ width: "100%", marginTop: 4 }} onClick={() => setAll(!all)}>
-            {all ? "收起" : `查看全部 ${stores.length} 家`}
+            {all ? "收起" : `查看全部 ${list.length} 条`}
           </button>
         )}
-      </div>
+      </>
     );
   }
-  if (o.capabilityType === "chart.compare")
-    return (
-      <div className="card">
-        <h4><span>交付内容</span><small>{String(out.caption)}</small></h4>
-        <img className="chart-img" src={String(out.imageUrl)} alt={String(out.caption)} />
-      </div>
-    );
-  if (o.capabilityType === "photo.onsite") {
-    const photos = out.photos as Array<{ url: string; note?: string }>;
-    return (
-      <div className="card">
-        <h4><span>交付内容</span><small>{photos.length} 张照片</small></h4>
-        <div className="photos">
-          {photos.map((p, i) => (
-            <a key={i} href={p.url} target="_blank" rel="noreferrer"><img src={p.url} alt={p.note ?? `照片 ${i + 1}`} /></a>
+  return <pre className="json">{JSON.stringify(data, null, 2)}</pre>;
+}
+
+function Deliverable({ o }: { o: OrderDetail }) {
+  const out = o.output;
+  if (!out) return null;
+  const images = out.files.filter((f) => f.mime.startsWith("image/"));
+  const videos = out.files.filter((f) => f.mime.startsWith("video/"));
+  const others = out.files.filter((f) => !images.includes(f) && !videos.includes(f));
+  return (
+    <div className="card">
+      <h4><span>交付内容</span><small>{out.files.length ? `${out.files.length} 个文件` : ""}</small></h4>
+      {out.note && <p className="note">{out.note}</p>}
+      {out.data !== null && <DataView data={out.data} />}
+      {images.length > 0 && (
+        <div className="photos" style={{ marginTop: 8 }}>
+          {images.map((f) => (
+            <a key={f.id} href={f.url} target="_blank" rel="noreferrer"><img src={f.url} alt={f.name} /></a>
           ))}
         </div>
-      </div>
-    );
-  }
-  return (
-    <div className="card"><h4>交付内容</h4><pre className="json">{JSON.stringify(out, null, 2)}</pre></div>
+      )}
+      {videos.map((f) => <video key={f.id} className="video" src={f.url} controls playsInline preload="metadata" />)}
+      {(others.length > 0 || videos.length > 0) && (
+        <div className="files">
+          {[...videos, ...others].map((f) => (
+            <a key={f.id} href={f.url} download={f.name}>{f.name}<small>{fileSize(f.size)}</small></a>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -121,22 +130,29 @@ function Deliverable({ o }: { o: OrderDetail }) {
 function DeliverForm({ o, onDone }: { o: OrderDetail; onDone: () => void }) {
   const { busy, run } = useAction();
   const toast = useToast();
-  const count = o.capabilityType === "photo.onsite" ? Number((o.input as { count?: number }).count ?? 1) : 0;
-  const [urls, setUrls] = useState<string[]>(() => Array(count).fill(""));
+  const spec = o.deliverySpec;
+  const [note, setNote] = useState("");
   const [json, setJson] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  // Photos straight from the camera on a phone; other types open the file picker.
+  const accept = spec.kind === "files" ? spec.accept : undefined;
+  const camera = accept?.startsWith("image/");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    let output: unknown;
-    if (count) output = { photos: urls.map((u) => u.trim()).filter(Boolean).map((url) => ({ url })) };
-    else {
+    let data: unknown;
+    if (json.trim()) {
       try {
-        output = JSON.parse(json);
+        data = JSON.parse(json);
       } catch {
-        return toast("交付内容不是合法的 JSON");
+        return toast("数据不是合法的 JSON");
       }
     }
-    const r = await run(() => hive.action(o.id, "deliver", { output }));
+    const r = await run(async () => {
+      const ids = [];
+      for (const f of files) ids.push((await hive.upload(o.id, f)).id);
+      return hive.deliver(o.id, { ...(note.trim() ? { note } : {}), ...(data !== undefined ? { data } : {}), files: ids });
+    });
     if (r) {
       toast("已交付");
       onDone();
@@ -145,23 +161,34 @@ function DeliverForm({ o, onDone }: { o: OrderDetail; onDone: () => void }) {
 
   return (
     <form className="card" onSubmit={submit}>
-      <h4><span>交付</span><small>提交后先做格式校验，没通过可以改了再交</small></h4>
+      <h4><span>交付</span><small>买家要：{specText(spec)}</small></h4>
       <div className="inline-note"><AgentIcon small />也可以让你的 agent 交付：它用 hive 的 hive_deliver 工具，订单号 {o.id}</div>
-      {count ? (
-        urls.map((u, i) => (
-          <div className="field" key={i}>
-            <label htmlFor={`p${i}`}>照片 {i + 1} 链接</label>
-            <input id={`p${i}`} type="url" value={u} placeholder="https://…" onChange={(e) => setUrls(urls.map((x, j) => (j === i ? e.target.value : x)))} required={i === 0} />
-          </div>
-        ))
-      ) : (
+      {spec.kind !== "json" && (
         <div className="field">
-          <label htmlFor="out">交付内容（JSON）</label>
-          <textarea id="out" value={json} onChange={(e) => setJson(e.target.value)} required />
+          <label htmlFor="files">{camera ? "拍照或选照片" : "文件"}</label>
+          <input id="files" type="file" multiple accept={accept} {...(camera ? { capture: "environment" } : {})}
+            onChange={(e) => setFiles([...files, ...Array.from(e.target.files ?? [])])} />
+          {files.length > 0 && (
+            <div className="files">
+              {files.map((f, i) => (
+                <a key={i} href="#" onClick={(e) => (e.preventDefault(), setFiles(files.filter((_, j) => j !== i)))}>{f.name}<small>{fileSize(f.size)} · 移除</small></a>
+              ))}
+            </div>
+          )}
+          {camera && <span className="hint">可以多拍几张，每拍一张会加到列表里</span>}
         </div>
       )}
-      {count > 0 && <p className="field hint" style={{ border: 0, padding: "4px 0 0" }}>直接上传照片还在做，先贴图片链接</p>}
-      <button className="btn" type="submit" disabled={busy} style={{ marginTop: 12 }}>提交交付</button>
+      {(spec.kind === "json" || spec.kind === "any") && (
+        <div className="field">
+          <label htmlFor="out">{spec.kind === "json" ? "数据（JSON）" : "数据（JSON，可不填）"}</label>
+          <textarea id="out" value={json} onChange={(e) => setJson(e.target.value)} required={spec.kind === "json"} />
+        </div>
+      )}
+      <div className="field">
+        <label htmlFor="note">给买家的说明</label>
+        <textarea id="note" className="prose" value={note} onChange={(e) => setNote(e.target.value)} placeholder="交付了什么、有什么要注意的" />
+      </div>
+      <button className="btn" type="submit" disabled={busy} style={{ marginTop: 12 }}>{busy ? "提交中…" : "提交交付"}</button>
     </form>
   );
 }
@@ -242,7 +269,7 @@ export function OrderPage() {
           <button className="link" type="button" disabled={busy} onClick={() => window.confirm("拒收会计入卖家的通过率，钱已经付给卖家，暂时不能自动退款。确定拒收吗？") && act("verdict", { verdict: "rejected" }, "已拒收")}>拒收</button>
         </>
       );
-    if (isTerminal(o)) actions = <Link className="btn line" style={{ textAlign: "center" }} to={`/buy/${o.capabilityType}`}>再来一单</Link>;
+    if (isTerminal(o)) actions = <Link className="btn line" style={{ textAlign: "center" }} to={`/buy/${o.category}`}>再来一单</Link>;
   } else {
     if (o.status === "PAID")
       actions = <button className="btn" type="button" disabled={busy} onClick={() => act("start", undefined, "开始干活")}>开始干活</button>;
@@ -256,8 +283,8 @@ export function OrderPage() {
     <div className="page">
       <NavBar title="订单详情" />
       <div className="bill-head">
-        <TypeTile type={o.capabilityType} />
-        <div className="name">{typeTitle(o.capabilityType)}{o.sellerName ? ` · ${o.sellerName}` : ""}</div>
+        <TypeTile type={o.category} />
+        <div className="name">{typeTitle(o.category)}{o.sellerName ? ` · ${o.sellerName}` : ""}</div>
         <div className="amt tnum">{amount}</div>
         <div className={`status tone-${tone}`}>
           {role === "seller" && o.status === "PAID" ? "可以开始了" : STATUS_LABEL[o.status]}

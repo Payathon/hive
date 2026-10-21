@@ -1,101 +1,112 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { hive } from "../api.ts";
+import { hive, type DeliverySpec } from "../api.ts";
 import { typeTitle, yuan } from "../format.ts";
 import { NavBar, TypeTile, useAction, usePoll, useToast } from "../ui.tsx";
 
-const splitList = (s: string) => s.split(/[,，、\s]+/).map((x) => x.trim()).filter(Boolean);
+type Kind = DeliverySpec["kind"];
 
-// Hand-written forms for the platform's capability types; inputs are validated again on the server.
-function useForm(type: string) {
-  const [v, setV] = useState<Record<string, string>>(() =>
-    type === "market-data.competitors"
-      ? { city: "杭州", areas: "", category: "奶茶" }
-      : type === "photo.onsite"
-        ? { location: "", subject: "", count: "3" }
-        : { title: "", data: '[\n  { "商圈": "湖滨", "门店数": 12 },\n  { "商圈": "武林", "门店数": 8 }\n]', instructions: "" },
-  );
-  const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => setV({ ...v, [k]: e.target.value });
-  const field = (k: string, label: string, props: React.InputHTMLAttributes<HTMLInputElement> = {}, hint?: string) => (
-    <div className="field" key={k}>
-      <label htmlFor={k}>{label}</label>
-      <input id={k} value={v[k] ?? ""} onChange={set(k)} {...props} />
-      {hint && <span className="hint">{hint}</span>}
-    </div>
-  );
+// Offline jobs come back as photos, edits as a video; everything else defaults to "anything".
+const DEFAULT_FILES: Record<string, { accept: string; count: number }> = {
+  "onsite.photo": { accept: "image/*", count: 3 },
+  "media.video": { accept: "video/*", count: 1 },
+  "media.audio": { accept: "audio/*", count: 1 },
+  "design.image": { accept: "image/*", count: 1 },
+  "design.chart": { accept: "image/*", count: 1 },
+};
 
-  let fields: React.ReactNode;
-  let toInput: () => unknown;
-  if (type === "market-data.competitors") {
-    fields = [
-      field("city", "城市", { required: true }),
-      field("areas", "商圈", { required: true, placeholder: "湖滨 武林 滨江" }, "多个商圈用空格或逗号隔开"),
-      field("category", "品类", { required: true }),
-    ];
-    toInput = () => ({ city: v.city?.trim(), areas: splitList(v.areas ?? ""), category: v.category?.trim() });
-  } else if (type === "photo.onsite") {
-    fields = [
-      field("location", "地点", { required: true, placeholder: "例如 杭州湖滨银泰 in77" }),
-      field("subject", "拍什么", { required: true, placeholder: "例如 奶茶店门头和排队情况" }),
-      field("count", "张数", { required: true, type: "number", min: 1, max: 20, inputMode: "numeric" }),
-    ];
-    toInput = () => ({ location: v.location?.trim(), subject: v.subject?.trim(), count: Number(v.count) });
-  } else {
-    fields = [
-      field("title", "图表标题", { required: true }),
-      <div className="field" key="data">
-        <label htmlFor="data">数据（JSON 数组）</label>
-        <textarea id="data" value={v.data ?? ""} onChange={set("data")} required />
-      </div>,
-      field("instructions", "补充说明（可不填）"),
-    ];
-    toInput = () => {
-      let data: unknown;
-      try {
-        data = JSON.parse(v.data ?? "");
-      } catch {
-        throw new Error("数据不是合法的 JSON");
-      }
-      return { title: v.title?.trim(), data, ...(v.instructions?.trim() ? { instructions: v.instructions.trim() } : {}) };
-    };
+const parseJson = (s: string, what: string) => {
+  try {
+    return JSON.parse(s);
+  } catch {
+    throw new Error(`${what}不是合法的 JSON`);
   }
-  return { fields, toInput };
-}
+};
 
 export function Buy() {
-  const { type = "" } = useParams();
+  const { category = "" } = useParams();
   const navigate = useNavigate();
   const toast = useToast();
   const { busy, run } = useAction();
-  const { fields, toInput } = useForm(type);
-  const { data: market } = usePoll(() => hive.market(), 0);
-  const sellers = market?.find((m) => m.type === type)?.sellers ?? [];
+  const { data: market } = usePoll(() => hive.categories(), 0);
+  const sellers = market?.find((m) => m.id === category)?.sellers ?? [];
   const online = sellers.filter((s) => s.online);
+
+  const preset = DEFAULT_FILES[category];
+  const [brief, setBrief] = useState("");
+  const [kind, setKind] = useState<Kind>(preset ? "files" : "any");
+  const [accept, setAccept] = useState(preset?.accept ?? "");
+  const [count, setCount] = useState(String(preset?.count ?? 1));
+  const [schema, setSchema] = useState('{\n  "type": "object",\n  "required": ["items"],\n  "properties": { "items": { "type": "array", "minItems": 1 } }\n}');
+  const [extra, setExtra] = useState("");
+
+  function delivery(): DeliverySpec {
+    if (kind === "json") return { kind, schema: parseJson(schema, "交付格式") };
+    if (kind === "files") return { kind, ...(accept ? { accept } : {}), count: Math.max(1, Number(count) || 1) };
+    return { kind: "any" };
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    let input: unknown;
+    let order;
     try {
-      input = toInput();
+      order = { category, brief: brief.trim(), delivery: delivery(), ...(extra.trim() ? { input: parseJson(extra, "附加数据") } : {}) };
     } catch (err) {
       return toast((err as Error).message);
     }
-    const order = await run(() => hive.createOrder(type, input));
-    if (order) navigate(`/orders/${order.id}`, { replace: true });
+    const created = await run(() => hive.createOrder(order));
+    if (created) navigate(`/orders/${created.id}`, { replace: true });
   }
 
   return (
     <form className="page" onSubmit={submit}>
       <NavBar title="下单" />
       <div className="bill-head">
-        <TypeTile type={type} />
-        <div className="name">{typeTitle(type)}</div>
+        <TypeTile type={category} />
+        <div className="name">{typeTitle(category)}</div>
         <div className="status tone-go">
           {online.length ? `${online.length} 位卖家可接单` : "暂时没有卖家接单"}
           <small>{sellers[0] ? `¥${yuan(sellers[0].priceFen)} 起，接单后按卖家标价付款` : "现在下单会因为没人接而自动取消，不会扣款"}</small>
         </div>
       </div>
-      <div className="card">{fields}</div>
+      <div className="card">
+        <div className="field">
+          <label htmlFor="brief">要做什么</label>
+          <textarea id="brief" className="prose" value={brief} onChange={(e) => setBrief(e.target.value)} required maxLength={4000}
+            placeholder="说清楚要什么、在哪里、有什么要求。卖家的标签会和这段话匹配" />
+        </div>
+        <div className="field">
+          <label htmlFor="kind">交付成什么样</label>
+          <select id="kind" value={kind} onChange={(e) => setKind(e.target.value as Kind)}>
+            <option value="any">不限，我看了再验收</option>
+            <option value="files">文件（照片、视频、文档…）</option>
+            <option value="json">JSON 数据，按我给的格式校验</option>
+          </select>
+          {kind === "files" && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <select aria-label="文件类型" value={accept} onChange={(e) => setAccept(e.target.value)}>
+                <option value="">任意文件</option>
+                <option value="image/*">图片</option>
+                <option value="video/*">视频</option>
+                <option value="audio/*">音频</option>
+                <option value="application/pdf">PDF</option>
+              </select>
+              <input aria-label="至少几个" type="number" min={1} max={50} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value)} style={{ width: 80 }} />
+            </div>
+          )}
+          {kind === "json" && (
+            <>
+              <textarea aria-label="JSON Schema" value={schema} onChange={(e) => setSchema(e.target.value)} />
+              <span className="hint">JSON Schema。交付的数据不符合就退回卖家重交</span>
+            </>
+          )}
+          {kind !== "json" && <span className="hint">hive 只检查{kind === "files" ? "文件类型和数量" : "交付不是空的"}，好不好由你验收</span>}
+        </div>
+        <div className="field">
+          <label htmlFor="extra">附加数据（JSON，可不填）</label>
+          <textarea id="extra" value={extra} onChange={(e) => setExtra(e.target.value)} placeholder='例如要画成图的数据：[{ "商圈": "湖滨", "门店数": 12 }]' />
+        </div>
+      </div>
       <p className="section-title">下单后 hive 会派给在线卖家。卖家接单后你再付款，钱直接到卖家的支付宝。</p>
       <div className="actionbar">
         <button className="btn" type="submit" disabled={busy}>下单</button>

@@ -1,17 +1,36 @@
-import { capabilityTypes } from "@hive/core";
-import type { OrderDetail, OrderStatus, OrderSummary } from "./api.ts";
+import type { CategoryInfo, DeliverySpec, OrderDetail, OrderStatus, OrderSummary } from "./api.ts";
 
 export const yuan = (fen: number | null | undefined) => (fen == null ? "—" : (fen / 100).toFixed(2));
 
-export const typeTitle = (type: string) => (capabilityTypes as Record<string, { title: string }>)[type]?.title ?? type;
-
-// Short glyph for a capability's icon tile.
-export const TYPE_ICON: Record<string, { label: string; color: string }> = {
-  "market-data.competitors": { label: "数据", color: "#1677ff" },
-  "chart.compare": { label: "图表", color: "#00b578" },
-  "photo.onsite": { label: "拍照", color: "#ff8f1f" },
+// Categories are data from the server; loaded once at sign-in and refreshed by the market page.
+let categories = new Map<string, CategoryInfo>();
+export const setCategories = (list: CategoryInfo[]) => {
+  categories = new Map(list.map((c) => [c.id, c]));
 };
-export const typeIcon = (type: string) => TYPE_ICON[type] ?? { label: typeTitle(type).slice(0, 2), color: "#8c8c8c" };
+export const allCategories = () => [...categories.values()];
+export const category = (id: string) => categories.get(id);
+
+export const typeTitle = (id: string) => categories.get(id)?.title ?? id;
+
+// Short glyph and colour for a category's icon tile.
+export const typeIcon = (id: string) => {
+  const c = categories.get(id);
+  return c ? { label: c.icon, color: c.color } : { label: id.slice(0, 2), color: "#8c8c8c" };
+};
+
+const MIME_WORD: Record<string, string> = { "image/*": "图片", "video/*": "视频", "audio/*": "音频" };
+export const specText = (spec: DeliverySpec) => {
+  switch (spec.kind) {
+    case "json":
+      return "JSON 数据，按买家给的格式校验";
+    case "files":
+      return `${spec.accept ? (MIME_WORD[spec.accept] ?? spec.accept) : "文件"}，至少 ${spec.count ?? 1} 个`;
+    case "any":
+      return "不限格式";
+  }
+};
+
+export const fileSize = (n: number) => (n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(0)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`);
 
 export const STATUS_LABEL: Record<OrderStatus, string> = {
   CREATED: "正在派单",
@@ -116,7 +135,7 @@ export function timeline(o: OrderDetail, role: "buyer" | "seller"): Step[] {
       label: you ? `${seller} 交付了` : "交付",
       at: reached(["DELIVERED", "COMPLETED"]) ? last("delivery_submitted") : null,
       done: reached(["DELIVERED", "COMPLETED"]),
-      now: o.lastDeliveryError ? `上次提交没通过格式校验：${o.lastDeliveryError}` : "交付后会先做格式校验",
+      now: o.lastDeliveryError ? `上次提交没通过格式检查：${o.lastDeliveryError}` : "交付后先检查格式是否符合买家要求",
     },
     {
       label: o.verdict ? VERDICT[o.verdict] ?? "验收" : you ? "你确认收货" : "买家验收",
