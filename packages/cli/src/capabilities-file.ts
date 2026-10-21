@@ -4,11 +4,12 @@ import { z } from "zod";
 
 // ~/.hive/capabilities.yaml: what this machine sells and how to run it.
 // Prices are not set here: sellers set them on Alipay's hosted 即刻收 page.
+// Without `run`, the work is done by hand (HITL or offline) and delivered from the app or over MCP.
 const entry = z.object({
   type: z.string(),
   accept: z.enum(["auto", "ask"]).default("auto"),
   daily_limit: z.number().int().positive().default(50),
-  run: z.string().min(1),
+  run: z.string().min(1).optional(),
 });
 
 export type CapabilityEntry = z.infer<typeof entry>;

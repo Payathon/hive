@@ -20,7 +20,8 @@ it("seed sellers produce schema-valid deliveries", async () => {
     const type = cap.type as keyof typeof capabilityTypes;
     const info = { type, title: capabilityTypes[type].title, output: {} } as CapabilityTypeInfo;
     const task = buildTask({ id: "ord_seed", input: inputs[type] } as Order, info, null);
-    const r = await runCommand(cap.run, task, { timeoutMs: 10_000, cwd: repoRoot });
+    expect(cap.run, `seed ${type} needs a run command`).toBeDefined();
+    const r = await runCommand(cap.run!, task, { timeoutMs: 10_000, cwd: repoRoot });
     expect(r.code, r.stderr).toBe(0);
     expect(checkOutput(type, parseOutput(r.stdout))).toMatchObject({ ok: true });
   }

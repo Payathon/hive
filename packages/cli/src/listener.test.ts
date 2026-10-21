@@ -16,13 +16,13 @@ async function start() {
   return env;
 }
 
-async function sellerWith(run: string) {
+async function sellerWith(run: string | undefined) {
   const env = await start();
   const sellerToken = await env.signup("seller");
   const logs: string[] = [];
   const listener = new Listener(
     new HiveClient(env.base, sellerToken),
-    [{ type: DATA, accept: "auto", daily_limit: 10, run }],
+    [{ type: DATA, accept: "auto", daily_limit: 10, ...(run ? { run } : {}) }],
     (m) => logs.push(m),
   );
   await listener.sync();
@@ -66,6 +66,15 @@ describe("hive serve", () => {
     const done = await runOrder(t);
     expect(done.status).toBe("DELIVERED");
     expect(done.deliveryAttempts).toBe(2);
+  });
+
+  it("leaves paid orders without a run command to the owner", async () => {
+    const t = await sellerWith(undefined);
+    expect(t.logs[0]).toBe(`listed ${DATA} at ¥5.00 (auto, by hand)`);
+    const paid = await runOrder(t);
+    await t.listener.pollOnce(0);
+    expect(paid.status).toBe("PAID");
+    expect(t.logs.filter((m) => m.includes("hive_deliver"))).toHaveLength(1);
   });
 
   it("abandons the order after repeated failures", async () => {

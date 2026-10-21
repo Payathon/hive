@@ -13,6 +13,8 @@ export class Listener {
   private types = new Map<string, CapabilityTypeInfo>();
   private entries = new Map<string, CapabilityEntry>();
   private busy = new Set<string>();
+  // Paid orders left to the owner because their capability has no `run`; logged once each.
+  private manual = new Set<string>();
   private abort = new AbortController();
   private running: Promise<void>[] = [];
 
@@ -33,7 +35,7 @@ export class Listener {
       await this.client.upsertListing(entry.type, { acceptMode: entry.accept, dailyLimit: entry.daily_limit });
       const pay = await this.client.paymentSetup(entry.type);
       if (pay.status === "ENABLED" && pay.priceFen !== null) {
-        this.log(`listed ${entry.type} at ${yuan(pay.priceFen)} (${entry.accept})`);
+        this.log(`listed ${entry.type} at ${yuan(pay.priceFen)} (${entry.accept}${entry.run ? "" : ", by hand"})`);
       } else {
         const next = pay.configurationUrl ?? pay.managementUrl ?? "(no link returned)";
         this.log(`${entry.type}: 即刻收 status ${pay.status}, set a "1 次" price in Alipay: ${next}`);
@@ -41,16 +43,23 @@ export class Listener {
     }
   }
 
-  // One poll round. Exposed for tests; `run` loops it.
+  // One poll round. Exposed for tests; `run` loops it. Returns whether anything was pending.
   async pollOnce(waitSeconds = this.pollSeconds) {
     const inbox = await this.client.poll(waitSeconds, this.abort.signal);
     for (const offer of inbox.offers) await this.handleOffer(offer);
     for (const order of inbox.work) {
-      if (this.busy.has(order.id)) continue;
+      if (this.busy.has(order.id) || this.manual.has(order.id)) continue;
+      const entry = this.entries.get(order.capabilityType);
+      if (entry && !entry.run) {
+        this.manual.add(order.id);
+        this.log(`${order.id} (${order.capabilityType}) is paid; do it yourself and deliver in the app, or have your agent use hive_deliver`);
+        continue;
+      }
       this.busy.add(order.id);
       const job = this.work(order).finally(() => this.busy.delete(order.id));
       this.running.push(job);
     }
+    return inbox.offers.length + inbox.work.length > 0;
   }
 
   async run() {
@@ -58,7 +67,9 @@ export class Listener {
     this.log(`listening for orders on ${this.client.server}`);
     while (!this.abort.signal.aborted) {
       try {
-        await this.pollOnce();
+        // The poll returns at once while anything is pending (offers left to the owner, work in
+        // flight), so back off instead of spinning on it.
+        if (await this.pollOnce()) await new Promise((r) => setTimeout(r, 3000));
       } catch (err) {
         if (this.abort.signal.aborted) break;
         this.log(`poll failed: ${(err as Error).message}; retrying in 5s`);
@@ -94,7 +105,7 @@ export class Listener {
   private async work(order: Order) {
     const entry = this.entries.get(order.capabilityType);
     const type = this.types.get(order.capabilityType);
-    if (!entry || !type) {
+    if (!entry?.run || !type) {
       this.log(`no capability configured for paid order ${order.id}; abandoning`);
       await this.client.orderAction(order.id, "abandon");
       return;

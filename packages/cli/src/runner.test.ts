@@ -53,8 +53,10 @@ it("parses a capabilities file with defaults", () => {
   accept: ask
   daily_limit: 3
   run: "true"
+- type: chart.compare
 `);
   expect(caps[0]).toMatchObject({ accept: "auto", daily_limit: 50 });
   expect(caps[1]).toMatchObject({ accept: "ask", daily_limit: 3 });
-  expect(() => parseCapabilities("- type: x")).toThrow();
+  expect(caps[2]!.run).toBeUndefined(); // done by hand
+  expect(() => parseCapabilities("- type: x\n  accept: sometimes")).toThrow();
 });
