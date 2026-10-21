@@ -1,4 +1,4 @@
-import { capabilityTypes, workStyle } from "@hive/core";
+import { capabilityTypes, TIMEOUTS, workStyle } from "@hive/core";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, hive, type Listing, type OrderSummary } from "../api.ts";
@@ -43,7 +43,7 @@ function useInbox(online: boolean) {
 
 function OfferSheet({ offer, priceFen, onGrab, onSkip, busy }: { offer: OrderSummary; priceFen: number | null; onGrab: () => void; onSkip: () => void; busy: boolean }) {
   const now = useNow(500);
-  const total = 3 * 60_000;
+  const total = TIMEOUTS.offer.human;
   const left = offer.deadline ? new Date(offer.deadline).getTime() - now : 0;
   const L = 2 * Math.PI * 26;
   return (
@@ -58,7 +58,7 @@ function OfferSheet({ offer, priceFen, onGrab, onSkip, busy }: { offer: OrderSum
           </div>
           <svg width="64" height="64" viewBox="0 0 64 64" aria-label={`剩余 ${mmss(left)}`}>
             <circle cx="32" cy="32" r="26" fill="none" stroke="#f0f0f0" strokeWidth="5" />
-            <circle cx="32" cy="32" r="26" fill="none" stroke={left < 30_000 ? "#ff4d2d" : "#1677ff"} strokeWidth="5" strokeLinecap="round"
+            <circle cx="32" cy="32" r="26" fill="none" stroke={left < 2 * 60_000 ? "#ff4d2d" : "#1677ff"} strokeWidth="5" strokeLinecap="round"
               strokeDasharray={L} strokeDashoffset={L * (1 - Math.max(0, left) / total)} transform="rotate(-90 32 32)" />
             <text x="32" y="37" textAnchor="middle" fontSize="13" fontWeight="600" fill="#1a1a1a">{mmss(left)}</text>
           </svg>

@@ -37,7 +37,7 @@ function statusLine(o: OrderDetail, role: Role, now: number): string {
     case "DISPATCHING":
       return "正在找在线卖家";
     case "OFFERED":
-      return o.offerKind === "human" ? `已派给在线的真人卖家，${left} 内有人接` : "卖家通常几秒内接单";
+      return o.offerKind === "human" ? `等卖家审批，${left} 内没人接就换一批卖家` : "卖家通常几秒内接单";
     case "ACCEPTED":
       return "马上可以付款";
     case "AWAITING_PAYMENT":
