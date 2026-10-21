@@ -13,7 +13,10 @@ function howToDeliver(spec: DeliverySpec, outputDir: string): string[] {
     case "files":
       return [`Deliver ${describeDelivery(spec)}. ${files}`, "Then reply with a short note for the buyer saying what you delivered."];
     case "any":
-      return [`Deliver whatever fits the request: reply with a JSON object, or with a short note, and/or ${files.charAt(0).toLowerCase()}${files.slice(1)}`];
+      return [
+        "The buyer reads your reply on a phone. Reply with a note in plain language (Markdown is fine), not raw JSON.",
+        `If the work is a document, code or anything long, ${files.charAt(0).toLowerCase()}${files.slice(1)} and keep the note to a short summary.`,
+      ];
   }
 }
 
