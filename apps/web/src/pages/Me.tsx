@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router";
-import { hive } from "../api.ts";
+import { hive, type AgentGrant } from "../api.ts";
 import { shortDate, typeTitle, yuan } from "../format.ts";
 import { AgentIcon, Switch, TabBar, useAction, usePoll, useSession, useToast } from "../ui.tsx";
 
@@ -48,14 +48,55 @@ function Rules() {
   );
 }
 
-function Agents() {
+const SOURCE: Record<string, string> = { login: "hive login 授权", api_key: "API key" };
+
+// The agents that may order for this account. Hidden until there is one: approving happens through
+// the link an agent sends, never from here.
+function Agents({ grants, reload }: { grants: AgentGrant[]; reload: () => Promise<void> }) {
+  const { busy, run } = useAction();
+  const toast = useToast();
+
+  async function revoke(g: AgentGrant) {
+    if (!confirm(`撤销「${g.label || "agent"}」？它将不能再替你下单。`)) return;
+    if (await run(() => hive.revokeAgent(g.id))) {
+      toast("已撤销");
+      await reload();
+    }
+  }
+
+  if (grants.length === 0) return null;
+  return (
+    <div className="card">
+      <h4><span>我的 agent</span><small>能替你找服务、下单、验收</small></h4>
+      {grants.map((g) => (
+        <div className="list-row" key={g.id}>
+          <AgentIcon />
+          <div className="tx">
+            <b>{g.label || "agent"}</b>
+            <small>
+              {SOURCE[g.source ?? ""] ?? "授权"} · {shortDate(g.createdAt)}
+              {" · "}{g.lastOrderAt ? `最近下单 ${shortDate(g.lastOrderAt)}` : "还没下过单"}
+            </small>
+          </div>
+          <button className="btn sm line" type="button" disabled={busy} onClick={() => revoke(g)}>撤销</button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// For MCP clients that take a key instead of sending an approval link. Kept low-key: most owners never need it.
+function ApiKey({ onCreated }: { onCreated: () => Promise<void> }) {
   const { busy, run } = useAction();
   const toast = useToast();
   const [key, setKey] = useState<string | null>(null);
 
   async function makeKey() {
-    const r = await run(() => hive.apiKey("web"));
-    if (r) setKey(r.key);
+    const r = await run(() => hive.apiKey("API key"));
+    if (r) {
+      setKey(r.key);
+      await onCreated();
+    }
   }
   async function copy() {
     try {
@@ -66,25 +107,20 @@ function Agents() {
     }
   }
 
+  if (!key) {
+    return (
+      <button className="link" type="button" disabled={busy} onClick={makeKey} style={{ alignSelf: "center" }}>
+        给 Cursor 等 MCP 客户端生成 API key
+      </button>
+    );
+  }
   return (
     <div className="card">
-      <h4>我的 agent</h4>
-      <Link className="list-row" to="/approve">
-        <AgentIcon />
-        <div className="tx"><b>绑定 agent</b><small>agent 运行 hive login 后，输入它给的验证码</small></div>
-        <span className="r" style={{ color: "var(--sub)" }}>›</span>
-      </Link>
-      <div className="list-row">
-        <AgentIcon />
-        <div className="tx"><b>生成 API key</b><small>给 Cursor、Claude 等 MCP 客户端用，填到 /mcp 的 Bearer 里</small></div>
-        <button className="btn sm" type="button" disabled={busy} onClick={makeKey}>生成</button>
+      <div className="field" style={{ borderTop: 0 }}>
+        <label htmlFor="key">API key</label>
+        <input id="key" readOnly value={key} onFocus={(e) => e.target.select()} />
+        <span className="hint">只显示这一次，填到 /mcp 的 Bearer 里。<button className="link blue" type="button" onClick={copy}>复制</button></span>
       </div>
-      {key && (
-        <div className="field" style={{ borderTop: 0 }}>
-          <input readOnly value={key} onFocus={(e) => e.target.select()} aria-label="API key" />
-          <span className="hint">只显示这一次。<button className="link blue" type="button" onClick={copy}>复制</button></span>
-        </div>
-      )}
     </div>
   );
 }
@@ -92,6 +128,7 @@ function Agents() {
 export function MePage() {
   const { me, logout } = useSession();
   const { data: bill } = usePoll(() => hive.bill(), 15_000);
+  const { data: grants, reload: reloadGrants } = usePoll(() => hive.agents(), 0);
 
   return (
     <>
@@ -124,10 +161,11 @@ export function MePage() {
         </div>
 
         <Rules />
-        <Agents />
+        <Agents grants={grants ?? []} reload={reloadGrants} />
         <div className="card" style={{ padding: 0 }}>
           <button className="btn line" type="button" style={{ border: 0 }} onClick={logout}>退出登录</button>
         </div>
+        <ApiKey onCreated={reloadGrants} />
       </div>
       <TabBar />
     </>

@@ -45,6 +45,22 @@ export interface Me {
   humanAccepting: boolean;
 }
 
+export interface PendingLogin {
+  userCode: string;
+  label: string | null;
+  expiresAt: string;
+  approved: boolean;
+}
+
+// A live agent credential: a `hive login` approval or an API key.
+export interface AgentGrant {
+  id: string;
+  label: string | null;
+  source: "login" | "api_key" | null;
+  createdAt: string;
+  lastOrderAt: string | null;
+}
+
 export interface MarketSeller {
   name: string;
   kind: "agent" | "human";
@@ -105,7 +121,10 @@ export const hive = {
   action: (id: string, action: string, body: unknown = {}) => req<OrderSummary>("POST", `/v1/orders/${id}/${action}`, body),
   bill: () => req<Bill>("GET", "/v1/me/bill"),
   updateRules: (rules: Partial<Me["rules"]>) => req<Me["rules"]>("PATCH", "/v1/me/rules", rules),
+  pendingLogin: (userCode: string) => req<PendingLogin>("GET", `/v1/device-logins/${encodeURIComponent(userCode)}`),
   approve: (userCode: string) => req<{ ok: true }>("POST", "/v1/device-logins/approve", { userCode }),
+  agents: () => req<AgentGrant[]>("GET", "/v1/agents"),
+  revokeAgent: (id: string) => req<{ ok: true }>("POST", `/v1/agents/${id}/revoke`, {}),
   apiKey: (label: string) => req<{ key: string }>("POST", "/v1/api-keys", { label }),
   listings: () => req<Listing[]>("GET", "/v1/listings"),
   upsertListing: (type: string, dailyLimit: number) =>
