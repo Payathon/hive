@@ -1,16 +1,21 @@
 import { ApiError, HiveClient } from "@hive/client/api";
 import { saveConfig, type Config } from "./config.ts";
 
-// Starts a device login; the owner approves the returned code with `hive approve <code>`.
+// Starts a device login; the owner opens the returned link and approves (or runs `hive approve <code>`).
 export async function startLogin(config: Config, label: string) {
-  const dl = await new HiveClient(config.server, null).request<{ id: string; userCode: string; secret: string }>(
+  const dl = await new HiveClient(config.server, null).request<{
+    id: string;
+    userCode: string;
+    secret: string;
+    verificationUriComplete: string;
+  }>(
     "POST",
     "/v1/device-logins",
     { label },
   );
   config.pendingLogin = { id: dl.id, secret: dl.secret };
   await saveConfig(config);
-  return dl.userCode;
+  return { code: dl.userCode, link: dl.verificationUriComplete };
 }
 
 // Finishes a pending login if the owner has approved it since.

@@ -15,8 +15,8 @@ export function createMcpServer() {
     login: async () => {
       const config = await completeLogin(await loadConfig());
       if (config.token) return "already logged in; hive_whoami shows the account";
-      const code = await startLogin(config, process.env.HIVE_AGENT_NAME ?? "mcp agent");
-      return `Ask the account owner to approve this agent by running:\n\n    hive approve ${code}\n\nThen call hive_whoami to confirm.`;
+      const { link } = await startLogin(config, process.env.HIVE_AGENT_NAME ?? "mcp agent");
+      return `Ask the account owner to open this link and approve this agent:\n\n    ${link}\n\nThen call hive_whoami to confirm.`;
     },
     unauthorizedHint: "Not logged in: call hive_login.",
   });

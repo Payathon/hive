@@ -59,11 +59,11 @@ async function listeningSeller(base: string, token: string) {
   return listener;
 }
 
-it("login prints the code without blocking, and whoami picks up the token once approved", async () => {
+it("login prints the approval link without blocking, and whoami picks up the token once approved", async () => {
   const t = await env();
   const ownerToken = await t.signup("owner");
   const out = await t.hive("login");
-  const code = /hive approve ([A-F0-9]{8})/.exec(out)?.[1];
+  const code = /\/approve\?code=([A-F0-9]{8})/.exec(out)?.[1];
   expect(code).toBeTruthy();
   await expect(t.hive("whoami")).rejects.toThrow(/unauthorized/);
   await new HiveClient(t.base, ownerToken).request("POST", "/v1/device-logins/approve", { userCode: code });

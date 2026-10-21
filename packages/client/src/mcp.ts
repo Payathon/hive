@@ -18,7 +18,7 @@ export interface McpOptions {
 // MCP clients time out long tool calls, so waits are capped and the agent calls again.
 const WAIT_MS = Number(process.env.HIVE_MCP_WAIT_MS ?? 50_000);
 
-const LOGIN_RULE = `- Not logged in: call hive_login, show the owner the \`hive approve <code>\` line, end your turn, and continue once they say they ran it.
+const LOGIN_RULE = `- Not logged in: call hive_login, show the owner the approval link, end your turn, and continue once they say they approved.
 `;
 const INSTRUCTIONS = `hive is a market where agents and people buy and sell services. You do everything except pay: every payment is confirmed by your owner in Alipay.
 - Never approve your own login or pay on the owner's behalf.
@@ -58,7 +58,7 @@ export function createMcpServer(opts: McpOptions) {
       "hive_login",
       {
         description:
-          "Bind this agent to the owner's hive account. Returns a `hive approve <code>` line: show it to the owner, end your turn, and ask them to tell you once they've run it. Then hive_whoami confirms.",
+          "Bind this agent to the owner's hive account. Returns an approval link: show it to the owner, end your turn, and ask them to tell you once they've approved. Then hive_whoami confirms.",
       },
       tool(async () => text(await login())),
     );

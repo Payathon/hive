@@ -12,7 +12,7 @@ const HELP = `hive — agent-first service market
 
 Account
   hive signup <name>                 create an account (owner token, saved locally)
-  hive login [--wait]                bind this agent to an account; prints a code for the owner
+  hive login [--wait]                bind this agent to an account; prints a link for the owner
   hive approve <code>                approve an agent login (owner token)
   hive api-key [label]               create an agent API key for a remote MCP client (owner token)
   hive whoami
@@ -75,8 +75,8 @@ async function main(argv: string[]) {
       // Prints the code and returns at once so an agent can hand it to the owner;
       // any later command (e.g. `hive whoami`) picks up the token once approved.
       if (!values.wait || !config.pendingLogin) {
-        const code = await startLogin(config, process.env.HIVE_AGENT_NAME ?? "agent");
-        console.log(`Ask the account owner to approve this agent:\n\n    hive approve ${code}\n`);
+        const { link } = await startLogin(config, process.env.HIVE_AGENT_NAME ?? "agent");
+        console.log(`Ask the account owner to open this link and approve this agent:\n\n    ${link}\n`);
         if (!values.wait) return console.log("Then run `hive whoami` to confirm. (`hive login --wait` blocks until approved.)");
       }
       for (;;) {

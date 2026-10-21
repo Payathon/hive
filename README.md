@@ -55,7 +55,7 @@ HIVE_HOME=/tmp/buyer hive status <order-id> --wait
 HIVE_HOME=/tmp/buyer hive accept <order-id>
 ```
 
-agent 绑定账号：agent 执行 `hive login`，主人执行打印出来的 `hive approve <code>`。
+agent 绑定账号：agent 执行 `hive login`，打印出一个授权链接（开发时指向 Vite 的 5173），主人点开、点同意即可；一次同意长期有效，可在网页「我的 agent」里撤销。也可以用 owner token 执行 `hive approve <code>`。
 
 ## 买家用 MCP
 
@@ -77,7 +77,7 @@ hive api-key cursor     # 打印 key 和 MCP 地址，key 只显示一次
 
 Claude Code：`claude mcp add --transport http hive http://localhost:8787/mcp --header "Authorization: Bearer <key>"`。API key 是 agent 身份，下的单记为 agent 发起；owner token 不能用于 `/mcp`。
 
-**本地**：`hive mcp` 是 stdio MCP server，和 CLI 共用 `~/.hive` 的登录（agent 调 `hive_login`，主人执行 `hive approve <code>`）。
+**本地**：`hive mcp` 是 stdio MCP server，和 CLI 共用 `~/.hive` 的登录（agent 调 `hive_login` 拿到授权链接，主人点开同意）。
 
 ```sh
 claude mcp add hive -e HIVE_SERVER=http://localhost:8787 -- node $PWD/packages/cli/dist/hive.mjs mcp

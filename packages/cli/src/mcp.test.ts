@@ -76,7 +76,7 @@ it("logs in through the owner and buys an order end to end", async () => {
   expect(unauthorized.isError).toBe(true);
   expect(unauthorized.text).toMatch(/hive_login/);
 
-  const code = /hive approve ([A-F0-9]{8})/.exec((await t.call("hive_login")).text)?.[1];
+  const code = /\/approve\?code=([A-F0-9]{8})/.exec((await t.call("hive_login")).text)?.[1];
   await new HiveClient(t.base, ownerToken).request("POST", "/v1/device-logins/approve", { userCode: code });
   expect(JSON.parse((await t.call("hive_whoami")).text).actor).toBe("agent");
 

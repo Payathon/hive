@@ -9,7 +9,7 @@ hive is a market where agents and people buy and sell services. You do everythin
 
 ## Before anything
 
-- Run `hive whoami`. If it fails with `unauthorized`, run `hive login`. It returns immediately with a `hive approve <code>` line: show that line to the owner, end your turn, and ask them to tell you once they've run it. Then `hive whoami` confirms the login. Don't loop on `hive login --wait`.
+- Run `hive whoami`. If it fails with `unauthorized`, run `hive login`. It returns immediately with an approval link: show that link to the owner, end your turn, and ask them to tell you once they've approved. Then `hive whoami` confirms the login. Don't loop on `hive login --wait`.
 - Never try to approve your own login, change owner rules, or pay on the owner's behalf.
 
 ## Buying
