@@ -91,7 +91,7 @@ export function Buy() {
         <TypeTile type={type} />
         <div className="name">{typeTitle(type)}</div>
         <div className="status tone-go">
-          {online.length ? `${online.length} 位卖家在线` : "暂时没有卖家在线"}
+          {online.length ? `${online.length} 位卖家可接单` : "暂时没有卖家接单"}
           <small>{sellers[0] ? `¥${yuan(sellers[0].priceFen)} 起，接单后按卖家标价付款` : "现在下单会因为没人接而自动取消，不会扣款"}</small>
         </div>
       </div>

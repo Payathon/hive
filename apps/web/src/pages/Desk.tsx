@@ -1,4 +1,4 @@
-import { capabilityTypes } from "@hive/core";
+import { capabilityTypes, workStyle } from "@hive/core";
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, hive, type Listing, type OrderSummary } from "../api.ts";
@@ -80,6 +80,8 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
   const unlisted = Object.keys(capabilityTypes).filter((t) => !listed.has(t));
   const [type, setType] = useState("");
   const [limit, setLimit] = useState("5");
+  const [accept, setAccept] = useState<"ask" | "auto">("ask");
+  const [hours, setHours] = useState("2");
 
   async function setup(t: string) {
     const r = await run(() => hive.paymentSetup(t));
@@ -92,7 +94,7 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
     e.preventDefault();
     const t = type || unlisted[0];
     if (!t) return;
-    if (!(await run(() => hive.upsertListing(t, Number(limit))))) return;
+    if (!(await run(() => hive.upsertListing(t, { acceptMode: accept, deliveryHours: Number(hours), dailyLimit: Number(limit) })))) return;
     await setup(t);
     setType("");
   }
@@ -105,7 +107,7 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
           <TypeTile type={l.capabilityType} size={32} />
           <div className="tx">
             <b>{typeTitle(l.capabilityType)}</b>
-            {l.acceptMode === "auto" && <span className="tag">自动接单</span>}
+            <span className="tag person">{workStyle(l)}</span>
             <small>每天最多 {l.dailyLimit} 单</small>
           </div>
           <div className="r">
@@ -124,6 +126,14 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
           </select>
           <input aria-label="每天上限" type="number" min={1} max={100} value={limit} onChange={(e) => setLimit(e.target.value)} style={{ width: 64, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }} />
           <button className="btn sm" type="submit" disabled={busy}>上架</button>
+          <div style={{ display: "flex", gap: 8, width: "100%", marginTop: 8, alignItems: "center", fontSize: 13 }}>
+            <select aria-label="接单方式" value={accept} onChange={(e) => setAccept(e.target.value as "ask" | "auto")} style={{ flex: 1, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }}>
+              <option value="ask">每单我来审批</option>
+              <option value="auto">自动接单</option>
+            </select>
+            <input aria-label="几小时内交付" type="number" min={1} max={720} value={hours} onChange={(e) => setHours(e.target.value)} style={{ width: 56, border: 0, background: "var(--bg)", borderRadius: 8, padding: "8px 10px" }} />
+            <span>小时内交付</span>
+          </div>
         </form>
       )}
     </div>
@@ -143,7 +153,7 @@ export function Desk() {
   const offer = inbox.offers.find((o) => !skipped.has(o.id));
   const { data: bill } = usePoll(() => hive.bill(), 15_000);
   const { data: listings, reload: reloadListings } = usePoll(() => hive.listings(), 0);
-  const canAccept = listings?.some((l) => l.acceptMode === "ask" && l.paymentStatus === "ENABLED") ?? false;
+  const canAccept = listings?.some((l) => l.paymentStatus === "ENABLED") ?? false;
 
   // Buzz once per new offer.
   const seen = useRef<string | null>(null);
@@ -183,10 +193,10 @@ export function Desk() {
       <div className="page">
         <div className="desk-head" style={{ paddingTop: "calc(16px + env(safe-area-inset-top, 0px))" }}>
           <button className={`desk-toggle${online ? " on" : ""}`} type="button" onClick={toggle} disabled={busy || (!online && !canAccept)}>
-            <span>{online ? "接单中" : "开始接单"}<small>{online ? `已在线 ${minutes} 分钟` : "像出车一样上线"}</small></span>
+            <span>{online ? "接单中" : "开始接单"}<small>{online ? `已开 ${minutes} 分钟 · 关掉页面也在接` : "像出车一样上线"}</small></span>
           </button>
           <div className="desk-state">
-            {!canAccept ? "先在下面上架一个能力并设置收款" : online ? <><b>正在听单</b> · 保持这个页面打开，有派单会弹出来</> : "停止接单时不会收到派单"}
+            {!canAccept ? "先在下面上架一个能力并设置收款" : online ? <><b>正在接单</b> · 要你审批的派单在这里弹出，自动接的单直接进「进行中」</> : "已暂停，不会收到派单"}
           </div>
         </div>
 

@@ -50,7 +50,7 @@ export function Market() {
                   <div className="tx">
                     <b>{m.title}</b>
                     <small>{BLURB[m.type] ?? m.type}</small>
-                    <small><span className={`dot${online ? " on" : ""}`} />{online} 位在线 · 共 {m.sellers.length} 位卖家</small>
+                    <small><span className={`dot${online ? " on" : ""}`} />{online} 位可接单 · 共 {m.sellers.length} 位卖家</small>
                   </div>
                   <span className="pr">{from === null ? <small>暂无</small> : <>¥{yuan(from)}<small> 起</small></>}</span>
                 </button>
@@ -62,8 +62,8 @@ export function Market() {
                         <span className="av">{s.name.slice(0, 1)}</span>
                         <div className="tx">
                           {s.name}
-                          <span className={`tag${s.kind === "human" ? " person" : ""}`}>{s.kind === "human" ? "真人" : "agent"}</span>
-                          <small><span className={`dot${s.online ? " on" : ""}`} />{s.online ? "在线" : "离线"} · {pct(s.passRate)} · 成交 {s.completed} 单</small>
+                          <span className={`tag${s.workStyle === "agent 全自动" ? "" : " person"}`}>{s.workStyle}</span>
+                          <small><span className={`dot${s.online ? " on" : ""}`} />{s.online ? "可接单" : "暂不接单"} · {pct(s.passRate)} · 成交 {s.completed} 单</small>
                         </div>
                         <span className="tnum">¥{yuan(s.priceFen)}</span>
                       </div>

@@ -63,7 +63,11 @@ export interface AgentGrant {
 
 export interface MarketSeller {
   name: string;
-  kind: "agent" | "human";
+  acceptMode: "auto" | "ask";
+  workMode: "agent" | "manual";
+  // e.g. "agent 全自动", "需卖家审批 · 人工交付 · 2 小时内"
+  workStyle: string;
+  workTimeoutMs: number;
   priceFen: number;
   online: boolean;
   passRate: number | null;
@@ -95,6 +99,8 @@ export interface Listing {
   id: string;
   capabilityType: string;
   acceptMode: "auto" | "ask";
+  workMode: "agent" | "manual";
+  deliveryHours: number | null;
   dailyLimit: number;
   active: boolean;
   priceFen: number | null;
@@ -127,8 +133,9 @@ export const hive = {
   revokeAgent: (id: string) => req<{ ok: true }>("POST", `/v1/agents/${id}/revoke`, {}),
   apiKey: (label: string) => req<{ key: string }>("POST", "/v1/api-keys", { label }),
   listings: () => req<Listing[]>("GET", "/v1/listings"),
-  upsertListing: (type: string, dailyLimit: number) =>
-    req<Listing>("PUT", `/v1/listings/${type}`, { acceptMode: "ask", dailyLimit }),
+  // Listed from the app, the work is always done by a person.
+  upsertListing: (type: string, opts: { acceptMode: "auto" | "ask"; deliveryHours: number; dailyLimit: number }) =>
+    req<Listing>("PUT", `/v1/listings/${type}`, { ...opts, workMode: "manual" }),
   paymentSetup: (type: string) => req<PaymentSetup>("POST", `/v1/listings/${type}/payment-setup`, {}),
   setAccepting: (on: boolean) => req<{ accepting: boolean }>("POST", "/v1/seller/accepting", { on }),
   // Long-poll as the human 接单台 (not as a `hive serve` listener).
