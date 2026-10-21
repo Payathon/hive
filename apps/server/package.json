@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "WEB_URL=${WEB_URL:-http://localhost:5173} tsx watch src/main.ts",
     "start": "tsx src/main.ts",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=20000",
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate"
   },

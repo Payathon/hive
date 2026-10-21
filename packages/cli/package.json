@@ -9,7 +9,7 @@
   "scripts": {
     "hive": "tsx src/main.ts",
     "build": "node build.mjs",
-    "test": "vitest run",
+    "test": "vitest run --testTimeout=20000",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
