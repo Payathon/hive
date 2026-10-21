@@ -1,18 +1,30 @@
 import { describe, expect, it } from "vitest";
 import { fen } from "./money.ts";
+import type { Delivery } from "./delivery.ts";
 import { expiryEvent, newOrder, transition, type Order, type OrderEvent } from "./order.ts";
 
 const t0 = new Date("2026-10-14T10:00:00Z");
 const at = (ms: number) => new Date(t0.getTime() + ms);
 
-const validOutput = { stores: [{ name: "A", area: "湖滨", address: "x" }], source: "seed" };
+// The buyer asked for competitor data in their own JSON Schema.
+const schema = {
+  type: "object",
+  required: ["stores", "source"],
+  properties: {
+    stores: { type: "array", minItems: 1, items: { type: "object", required: ["name"], properties: { name: { type: "string" } } } },
+    source: { type: "string" },
+  },
+};
+const delivery = (data: unknown): Delivery => ({ note: null, data, files: [] });
+const validOutput = delivery({ stores: [{ name: "A", area: "湖滨", address: "x" }], source: "seed" });
 
 function base(): Order {
   return newOrder({
     id: "o1",
-    capabilityType: "market-data.competitors",
+    category: "data",
     buyerAccountId: "buyer",
     input: { city: "杭州", areas: ["湖滨"], category: "奶茶" },
+    deliverySpec: { kind: "json", schema },
   });
 }
 
@@ -134,7 +146,7 @@ describe("work and delivery", () => {
 
   it("lets the seller resubmit a malformed delivery", () => {
     let o = apply(toPaid(), { type: "work_started" });
-    o = apply(o, { type: "delivery_submitted", output: { nope: true } });
+    o = apply(o, { type: "delivery_submitted", output: delivery({ nope: true }) });
     expect(o.status).toBe("IN_PROGRESS");
     expect(o.deliveryAttempts).toBe(1);
     expect(o.lastDeliveryError).toBeTruthy();
@@ -145,14 +157,14 @@ describe("work and delivery", () => {
   });
 
   it("does not accept an empty competitor list as a delivery", () => {
-    const o = apply(toPaid(), { type: "work_started" }, { type: "delivery_submitted", output: { stores: [], source: "none" } });
+    const o = apply(toPaid(), { type: "work_started" }, { type: "delivery_submitted", output: delivery({ stores: [], source: "none" }) });
     expect(o.status).toBe("IN_PROGRESS");
     expect(o.lastDeliveryError).toContain("stores");
   });
 
   it("fails a paid order whose seller never starts, and marks it refund-eligible", () => {
     const o = toPaid();
-    // market-data.competitors has a 10 minute work timeout, counted from payment.
+    // Accepted without a work time: the 10 minute default, counted from payment.
     expect(expiryEvent(o, at(10 * 60_000 - 1))).toBeNull();
     const failed = apply(o, expiryEvent(o, at(10 * 60_000))!);
     expect(failed.status).toBe("FAILED");

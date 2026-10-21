@@ -1,4 +1,4 @@
-import { checkOutput, capabilityTypes, type CapabilityType } from "./capabilities.ts";
+import { checkDelivery, type Delivery, type DeliverySpec } from "./delivery.ts";
 import type { Fen } from "./money.ts";
 
 // See docs/design.md §3 for the state diagram and transition table.
@@ -29,15 +29,20 @@ export const TIMEOUTS = {
   acceptance: 30 * MINUTE,
 } as const;
 
+// Work time when a seller accepted without one (orders from before per-listing deadlines).
+export const DEFAULT_WORK_TIMEOUT_MS = 10 * MINUTE;
+
 export type Verdict = "accepted" | "rejected" | "auto_accepted";
 export type CancelReason = "no_seller" | "buyer_cancelled" | "payment_expired";
 export type FailReason = "work_timeout" | "seller_abandoned" | "heartbeat_lost";
 
 export interface Order {
   id: string;
-  capabilityType: CapabilityType;
+  // Only steers dispatch; what to deliver is in deliverySpec.
+  category: string;
   buyerAccountId: string;
   input: unknown;
+  deliverySpec: DeliverySpec;
   status: OrderStatus;
   // Deadline of the current stage; the expiry event depends on the status.
   deadline: Date | null;
@@ -54,7 +59,7 @@ export interface Order {
   paymentRef: string | null;
   deliveryAttempts: number;
   lastDeliveryError: string | null;
-  output: unknown;
+  output: Delivery | null;
   verdict: Verdict | null;
   cancelReason: CancelReason | null;
   failReason: FailReason | null;
@@ -74,7 +79,7 @@ export type OrderEvent =
   | { type: "payment_expired" }
   | { type: "buyer_cancel" }
   | { type: "work_started" }
-  | { type: "delivery_submitted"; output: unknown }
+  | { type: "delivery_submitted"; output: Delivery }
   | { type: "work_failed"; reason: FailReason }
   | { type: "buyer_verdict"; verdict: "accepted" | "rejected" }
   | { type: "acceptance_expired" };
@@ -83,9 +88,10 @@ export type TransitionResult = { ok: true; order: Order } | { ok: false; error: 
 
 export function newOrder(params: {
   id: string;
-  capabilityType: CapabilityType;
+  category: string;
   buyerAccountId: string;
   input: unknown;
+  deliverySpec: DeliverySpec;
 }): Order {
   return {
     ...params,
@@ -202,7 +208,7 @@ export function transition(order: Order, event: OrderEvent, now: Date): Transiti
     case "payment_confirmed": {
       if (s !== "AWAITING_PAYMENT") return reject(order, event);
       // The work clock starts at payment, so a seller who never starts still times out.
-      const work = order.workTimeoutMs ?? capabilityTypes[order.capabilityType].workTimeoutMs;
+      const work = order.workTimeoutMs ?? DEFAULT_WORK_TIMEOUT_MS;
       return ok({
         ...order,
         status: "PAID",
@@ -233,7 +239,7 @@ export function transition(order: Order, event: OrderEvent, now: Date): Transiti
     case "delivery_submitted": {
       if (s !== "IN_PROGRESS") return reject(order, event);
       const attempts = order.deliveryAttempts + 1;
-      const checked = checkOutput(order.capabilityType, event.output);
+      const checked = checkDelivery(order.deliverySpec, event.output);
       // A malformed delivery doesn't fail the order; the seller may resubmit until the deadline.
       if (!checked.ok) {
         return ok({ ...order, deliveryAttempts: attempts, lastDeliveryError: checked.error });

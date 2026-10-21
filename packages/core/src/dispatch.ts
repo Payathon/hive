@@ -1,4 +1,3 @@
-import { capabilityTypes, type CapabilityType } from "./capabilities.ts";
 import type { Fen } from "./money.ts";
 import type { SellerKind } from "./order.ts";
 
@@ -12,10 +11,10 @@ export type WorkMode = "agent" | "manual";
 export const needsListener = (l: { acceptMode: AcceptMode; workMode: WorkMode }) =>
   l.acceptMode === "auto" && l.workMode === "agent";
 
-// Manual work runs on the seller's own promise; agents get the type's default.
-export function workTimeoutMs(type: CapabilityType, workMode: WorkMode, deliveryHours: number | null): number {
+// Manual work runs on the seller's own promise; agents get the category's default.
+export function workTimeoutMs(categoryDefaultMs: number, workMode: WorkMode, deliveryHours: number | null): number {
   if (workMode === "manual" && deliveryHours !== null) return deliveryHours * 3600_000;
-  return capabilityTypes[type].workTimeoutMs;
+  return categoryDefaultMs;
 }
 
 // How a seller works, as the market and buyer agents see it.
@@ -27,7 +26,9 @@ export function workStyle(l: { acceptMode: AcceptMode; workMode: WorkMode; deliv
 
 export interface Listing {
   sellerAccountId: string;
-  capabilityType: CapabilityType;
+  category: string;
+  // Free keywords the seller listed; matched against the order's text.
+  tags: readonly string[];
   priceFen: Fen;
   acceptMode: AcceptMode;
   workMode: WorkMode;
@@ -46,7 +47,9 @@ export const HUMAN_BROADCAST = 3;
 const DEFAULT_PASS_RATE = 0.8;
 
 export interface DispatchRequest {
-  capabilityType: CapabilityType;
+  category: string;
+  // The order's brief and input, which the sellers' tags are matched against.
+  text: string;
   buyerAccountId: string;
   maxPriceFen: Fen | null;
   passedBy: readonly string[];
@@ -55,11 +58,19 @@ export interface DispatchRequest {
 // `platformAccepts`: an auto listing done by hand has no listener to answer, so hive accepts for the seller.
 export type Offer = { sellerAccountIds: string[]; kind: SellerKind; platformAccepts: boolean } | null;
 
+// How many of the seller's tags appear in the order's text.
+export function tagScore(tags: readonly string[], text: string): number {
+  const haystack = text.toLowerCase();
+  return tags.filter((t) => t.trim() && haystack.includes(t.trim().toLowerCase())).length;
+}
+
+// Category first, then the sellers whose tags fit the order best, then price and pass rate.
 export function rankCandidates(listings: readonly Listing[], req: DispatchRequest): Listing[] {
+  const score = new Map(listings.map((l) => [l, tagScore(l.tags, req.text)]));
   return listings
     .filter(
       (l) =>
-        l.capabilityType === req.capabilityType &&
+        l.category === req.category &&
         l.online &&
         l.ordersToday < l.dailyLimit &&
         l.sellerAccountId !== req.buyerAccountId &&
@@ -68,6 +79,7 @@ export function rankCandidates(listings: readonly Listing[], req: DispatchReques
     )
     .sort(
       (a, b) =>
+        score.get(b)! - score.get(a)! ||
         a.priceFen - b.priceFen ||
         (b.passRate ?? DEFAULT_PASS_RATE) - (a.passRate ?? DEFAULT_PASS_RATE),
     );

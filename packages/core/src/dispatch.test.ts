@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { fen } from "./money.ts";
-import { nextOffer, rankCandidates, workStyle, workTimeoutMs, type DispatchRequest, type Listing } from "./dispatch.ts";
+import { nextOffer, rankCandidates, tagScore, workStyle, workTimeoutMs, type DispatchRequest, type Listing } from "./dispatch.ts";
 
 const listing = (over: Partial<Listing> & { sellerAccountId: string }): Listing => ({
-  capabilityType: "market-data.competitors",
+  category: "data",
+  tags: [],
   priceFen: fen(500),
   acceptMode: "auto",
   workMode: "agent",
@@ -15,21 +16,22 @@ const listing = (over: Partial<Listing> & { sellerAccountId: string }): Listing 
 });
 
 const req: DispatchRequest = {
-  capabilityType: "market-data.competitors",
+  category: "data",
+  text: "杭州湖滨的奶茶店竞品",
   buyerAccountId: "buyer",
   maxPriceFen: null,
   passedBy: [],
 };
 
 describe("rankCandidates", () => {
-  it("filters out offline, capped, self, passed, wrong-type and over-budget sellers", () => {
+  it("filters out offline, capped, self, passed, other-category and over-budget sellers", () => {
     const listings = [
       listing({ sellerAccountId: "ok" }),
       listing({ sellerAccountId: "offline", online: false }),
       listing({ sellerAccountId: "capped", ordersToday: 10 }),
       listing({ sellerAccountId: "buyer" }),
       listing({ sellerAccountId: "passed" }),
-      listing({ sellerAccountId: "chart", capabilityType: "chart.compare" }),
+      listing({ sellerAccountId: "chart", category: "chart" }),
       listing({ sellerAccountId: "pricey", priceFen: fen(900) }),
     ];
     const ranked = rankCandidates(listings, { ...req, passedBy: ["passed"], maxPriceFen: fen(800) });
@@ -46,6 +48,26 @@ describe("rankCandidates", () => {
       req,
     );
     expect(ranked.map((l) => l.sellerAccountId)).toEqual(["cheap-good", "cheap-bad", "mid-good"]);
+  });
+
+  it("puts sellers whose tags match the order first", () => {
+    const ranked = rankCandidates(
+      [
+        listing({ sellerAccountId: "cheap", priceFen: fen(300) }),
+        listing({ sellerAccountId: "coffee", priceFen: fen(400), tags: ["咖啡"] }),
+        listing({ sellerAccountId: "tea", priceFen: fen(500), tags: ["奶茶", "湖滨"] }),
+        listing({ sellerAccountId: "one", priceFen: fen(600), tags: ["杭州"] }),
+      ],
+      req,
+    );
+    expect(ranked.map((l) => l.sellerAccountId)).toEqual(["tea", "one", "cheap", "coffee"]);
+  });
+});
+
+describe("tagScore", () => {
+  it("counts tags found in the text, ignoring case and blanks", () => {
+    expect(tagScore(["MP4", "字幕", " ", "配乐"], "剪成 mp4，加字幕")).toBe(2);
+    expect(tagScore([], "anything")).toBe(0);
   });
 });
 
@@ -78,8 +100,8 @@ describe("work styles", () => {
     expect(workStyle({ acceptMode: "ask", workMode: "manual", deliveryHours: 2 })).toBe("需卖家审批 · 人工交付 · 2 小时内");
   });
 
-  it("times manual work by the seller's promise and agents by the type", () => {
-    expect(workTimeoutMs("photo.onsite", "manual", 3)).toBe(3 * 3600_000);
-    expect(workTimeoutMs("photo.onsite", "agent", 3)).toBe(120 * 60_000);
+  it("times manual work by the seller's promise and agents by the category", () => {
+    expect(workTimeoutMs(120 * 60_000, "manual", 3)).toBe(3 * 3600_000);
+    expect(workTimeoutMs(120 * 60_000, "agent", 3)).toBe(120 * 60_000);
   });
 });
