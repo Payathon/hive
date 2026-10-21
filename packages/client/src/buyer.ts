@@ -41,6 +41,9 @@ export function paymentPrompt(o: Order) {
     "Ask the owner to confirm in Alipay:",
     `  ${o.purchaseUrl}`,
     ...(o.purchaseQrCode ? [`  QR: ${o.purchaseQrCode}`] : []),
+    ...(o.purchaseUrl?.includes("/v1/dev/fake-pay/")
+      ? ["(This hive server uses test payments: the link opens a stand-in for Alipay and no real money moves.)"]
+      : []),
   ].join("\n");
 }
 
@@ -62,14 +65,29 @@ export function deliveryText(o: Order, base: string): string[] {
   ];
 }
 
+// What the agent can tell its owner when an order ends early.
+const WHY: Record<string, string> = {
+  no_seller: "nobody in this category took it; nothing was charged. Try again later or another category",
+  payment_expired: "the owner didn't pay in time; nothing was charged",
+  buyer_cancelled: "cancelled before payment; nothing was charged",
+  work_timeout: "the seller missed the delivery deadline after payment; refunds aren't automatic yet, tell the owner",
+  heartbeat_lost: "the seller's agent went offline mid-job after payment; refunds aren't automatic yet, tell the owner",
+  seller_abandoned: "the seller gave up after payment; refunds aren't automatic yet, tell the owner",
+};
+
 export function describe(o: Order, opts: { reviewHint?: string; base: string }): string {
   const reviewHint = opts.reviewHint ?? `review with: hive accept ${o.id}  |  hive reject ${o.id}`;
   const lines = [`${o.id}  ${o.status}  ${o.category}  ${yuan(o.priceFen)}`];
   if (o.status === "OFFERED") lines.push(offerLine(o));
   if (o.status === "AWAITING_PAYMENT") lines.push(paymentPrompt(o));
   if (o.status === "DELIVERED") lines.push("delivery:", ...deliveryText(o, opts.base), reviewHint);
-  if (o.status === "COMPLETED") lines.push(...deliveryText(o, opts.base));
-  if (o.cancelReason) lines.push(`cancelled: ${o.cancelReason}`);
-  if (o.failReason) lines.push(`failed: ${o.failReason}`);
+  if (o.status === "COMPLETED") {
+    if (o.verdict === "rejected") {
+      lines.push("rejected: counts against the seller's pass rate. The money already went to the seller and refunds aren't automatic yet; tell the owner.");
+    }
+    lines.push(...deliveryText(o, opts.base));
+  }
+  if (o.cancelReason) lines.push(`cancelled: ${o.cancelReason}${WHY[o.cancelReason] ? ` (${WHY[o.cancelReason]})` : ""}`);
+  if (o.failReason) lines.push(`failed: ${o.failReason}${WHY[o.failReason] ? ` (${WHY[o.failReason]})` : ""}`);
   return lines.join("\n");
 }
