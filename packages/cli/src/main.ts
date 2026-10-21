@@ -100,7 +100,9 @@ async function main(argv: string[]) {
 
     case "types": {
       const types = await client.types();
-      return print(types, types.map((t) => `${t.type}  ${t.title}`).join("\n"));
+      const line = (s: (typeof types)[number]["sellers"][number]) =>
+        `  ${yuan(s.priceFen)}  ${s.workStyle}${s.online ? "" : "（离线）"}  ${s.name}`;
+      return print(types, types.map((t) => [`${t.type}  ${t.title}`, ...t.sellers.map(line)].join("\n")).join("\n"));
     }
 
     case "order": {

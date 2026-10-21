@@ -32,10 +32,16 @@ export class Listener {
     for (const t of await this.client.types()) this.types.set(t.type, t);
     for (const entry of this.entries.values()) {
       if (!this.types.has(entry.type)) throw new Error(`unknown capability type in capabilities file: ${entry.type}`);
-      await this.client.upsertListing(entry.type, { acceptMode: entry.accept, dailyLimit: entry.daily_limit });
+      await this.client.upsertListing(entry.type, {
+        acceptMode: entry.accept,
+        workMode: entry.run ? "agent" : "manual",
+        deliveryHours: entry.run ? null : (entry.delivery_hours ?? null),
+        dailyLimit: entry.daily_limit,
+      });
       const pay = await this.client.paymentSetup(entry.type);
       if (pay.status === "ENABLED" && pay.priceFen !== null) {
-        this.log(`listed ${entry.type} at ${yuan(pay.priceFen)} (${entry.accept}${entry.run ? "" : ", by hand"})`);
+        const hand = entry.run ? "" : `, by hand within ${entry.delivery_hours}h`;
+        this.log(`listed ${entry.type} at ${yuan(pay.priceFen)} (${entry.accept}${hand})`);
       } else {
         const next = pay.configurationUrl ?? pay.managementUrl ?? "(no link returned)";
         this.log(`${entry.type}: 即刻收 status ${pay.status}, set a "1 次" price in Alipay: ${next}`);
@@ -90,7 +96,8 @@ export class Listener {
 
   private async handleOffer(order: Order) {
     const entry = this.entries.get(order.capabilityType);
-    // Human (`ask`) offers are answered from the web 接单台, not by the listener.
+    // `ask` offers are approved from the web 接单台, not by the listener. Auto listings done by
+  // hand never get here: hive accepts those itself.
     if (!entry || entry.accept !== "auto") return;
     try {
       const accepted = await this.client.orderAction(order.id, "accept-offer");

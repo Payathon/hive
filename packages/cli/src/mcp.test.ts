@@ -40,7 +40,7 @@ async function env() {
 async function listeningSeller(base: string, token: string, run: string | null = `printf '%s' '${JSON.stringify(good)}'`) {
   const listener = new Listener(
     new HiveClient(base, token),
-    [{ type: "market-data.competitors", accept: "auto", daily_limit: 10, ...(run ? { run } : {}) }],
+    [{ type: "market-data.competitors", accept: "auto", daily_limit: 10, ...(run ? { run } : { delivery_hours: 2 }) }],
     () => {},
     1,
   );

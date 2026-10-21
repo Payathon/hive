@@ -17,12 +17,13 @@ async function start() {
 }
 
 async function sellerWith(run: string | undefined) {
+  // Work done by hand needs a delivery time instead of a run command.
   const env = await start();
   const sellerToken = await env.signup("seller");
   const logs: string[] = [];
   const listener = new Listener(
     new HiveClient(env.base, sellerToken),
-    [{ type: DATA, accept: "auto", daily_limit: 10, ...(run ? { run } : {}) }],
+    [{ type: DATA, accept: "auto", daily_limit: 10, ...(run ? { run } : { delivery_hours: 2 }) }],
     (m) => logs.push(m),
   );
   await listener.sync();
@@ -70,7 +71,7 @@ describe("hive serve", () => {
 
   it("leaves paid orders without a run command to the owner", async () => {
     const t = await sellerWith(undefined);
-    expect(t.logs[0]).toBe(`listed ${DATA} at ¥5.00 (auto, by hand)`);
+    expect(t.logs[0]).toBe(`listed ${DATA} at ¥5.00 (auto, by hand within 2h)`);
     const paid = await runOrder(t);
     await t.listener.pollOnce(0);
     expect(paid.status).toBe("PAID");

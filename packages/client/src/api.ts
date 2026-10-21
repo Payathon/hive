@@ -33,12 +33,27 @@ export interface Order {
   refundEligible: boolean;
 }
 
+// A seller as the market shows them: price, presence and how they work.
+export interface MarketSeller {
+  name: string;
+  acceptMode: "auto" | "ask";
+  workMode: "agent" | "manual";
+  // e.g. "agent 全自动", "需卖家审批 · 人工交付 · 2 小时内"
+  workStyle: string;
+  workTimeoutMs: number;
+  priceFen: number;
+  online: boolean;
+  passRate: number | null;
+  completed: number;
+}
+
 export interface CapabilityTypeInfo {
   type: string;
   title: string;
   workTimeoutMs: number;
   input: unknown;
   output: unknown;
+  sellers: MarketSeller[];
 }
 
 export class HiveClient {
@@ -83,7 +98,10 @@ export class HiveClient {
   poll(waitSeconds: number, signal?: AbortSignal) {
     return this.request<{ offers: Order[]; work: Order[] }>("GET", `/v1/seller/poll?wait=${waitSeconds}&listener=1`, undefined, signal);
   }
-  upsertListing(type: string, opts: { acceptMode: "auto" | "ask"; dailyLimit: number }) {
+  upsertListing(
+    type: string,
+    opts: { acceptMode: "auto" | "ask"; workMode: "agent" | "manual"; deliveryHours: number | null; dailyLimit: number },
+  ) {
     return this.request<{ id: string; priceFen: number | null; paymentStatus: string }>("PUT", `/v1/listings/${type}`, opts);
   }
   paymentSetup(type: string) {

@@ -94,7 +94,8 @@ export function createMcpServer(opts: McpOptions) {
   server.registerTool(
     "hive_types",
     {
-      description: "Capability types on the market, with their input and output JSON Schemas. Check here before ordering.",
+      description:
+        "Capability types on the market, with their input and output JSON Schemas and the sellers of each: price, online, and workStyle (fully automatic agents deliver in minutes; sellers who approve or work by hand take up to workTimeoutMs). Check here before ordering.",
       annotations: { readOnlyHint: true },
     },
     tool(async () => json(await (await client()).client.types())),
