@@ -23,8 +23,14 @@ async function body<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer
 
 const fenAmount = z.number().int().nonnegative();
 
-export function createApp(hive: Hive) {
+export interface AppOptions {
+  // Where the web app lives, for links sent to people. Defaults to the origin the request came in on.
+  webUrl?: string;
+}
+
+export function createApp(hive: Hive, opts: AppOptions = {}) {
   const app = new Hono<Env>();
+  const webUrl = (c: Context) => (opts.webUrl ?? new URL(c.req.url).origin).replace(/\/$/, "");
 
   app.onError((err, c) => {
     if (err instanceof HiveError) return c.json({ error: err.code, message: err.message }, err.status);
@@ -59,7 +65,9 @@ export function createApp(hive: Hive) {
   app.post("/v1/device-logins", async (c) => {
     const { label } = await body(c, z.object({ label: z.string().max(64).optional() }));
     const dl = await hive.startDeviceLogin(label ?? null);
-    return c.json({ ...dl, approveHint: `POST /v1/device-logins/approve {"userCode":"${dl.userCode}"}` }, 201);
+    // RFC 8628's verification_uri(_complete): the owner opens the link and taps approve.
+    const verificationUri = `${webUrl(c)}/approve`;
+    return c.json({ ...dl, verificationUri, verificationUriComplete: `${verificationUri}?code=${dl.userCode}` }, 201);
   });
 
   app.post("/v1/device-logins/:id/poll", async (c) => {
@@ -95,6 +103,8 @@ export function createApp(hive: Hive) {
   });
   const me = (c: Context<Env>) => c.get("principal");
 
+  authed.get("/device-logins/:code", async (c) => c.json(await hive.describeDeviceLogin(me(c), c.req.param("code"))));
+
   authed.post("/device-logins/approve", async (c) => {
     const { userCode } = await body(c, z.object({ userCode: z.string() }));
     await hive.approveDeviceLogin(me(c), userCode);
@@ -104,6 +114,12 @@ export function createApp(hive: Hive) {
   authed.post("/api-keys", async (c) => {
     const { label } = await body(c, z.object({ label: z.string().max(64).optional() }));
     return c.json(await hive.createApiKey(me(c), label ?? null), 201);
+  });
+
+  authed.get("/agents", async (c) => c.json(await hive.listAgents(me(c))));
+  authed.post("/agents/:id/revoke", async (c) => {
+    await hive.revokeAgent(me(c), c.req.param("id"));
+    return c.json({ ok: true });
   });
 
   authed.get("/me", async (c) => {

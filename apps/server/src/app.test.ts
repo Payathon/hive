@@ -24,6 +24,45 @@ describe("accounts and auth", () => {
     expect((await t.call("POST", `/v1/device-logins/${dl.id}/poll`, undefined, { secret: dl.secret })).status).toBe(409);
   });
 
+  it("hands out an approval link the owner opens to see who is asking", async () => {
+    const t = await setup();
+    const alice = await t.account("alice");
+    const dl = await t.ok("POST", "/v1/device-logins", undefined, { label: "claude" });
+    expect(dl.verificationUri).toBe(`${BASE}/approve`);
+    expect(dl.verificationUriComplete).toBe(`${BASE}/approve?code=${dl.userCode}`);
+    expect(await t.ok("GET", `/v1/device-logins/${dl.userCode}`, alice.token)).toMatchObject({ label: "claude", approved: false });
+    await t.ok("POST", "/v1/device-logins/approve", alice.token, { userCode: dl.userCode });
+    expect((await t.ok("GET", `/v1/device-logins/${dl.userCode}`, alice.token)).approved).toBe(true);
+    expect((await t.call("GET", "/v1/device-logins/NOPE0000", alice.token)).status).toBe(404);
+  });
+
+  it("lists the owner's agents with their last order and revokes one at a time", async () => {
+    const t = await setup();
+    await t.agentSeller("data-agent", DATA, 500);
+    const alice = await t.account("alice");
+    const cli = await t.agentToken(alice.token);
+    const { key } = await t.ok("POST", "/v1/api-keys", alice.token, { label: "cursor" });
+    const order = await t.ok("POST", "/v1/orders", cli, { type: DATA, input: inputs[DATA] });
+
+    const agents = await t.ok("GET", "/v1/agents", alice.token);
+    expect(agents.map((a: { label: string; source: string }) => [a.label, a.source])).toEqual([
+      ["cursor", "api_key"],
+      ["test agent", "login"],
+    ]);
+    expect(agents[0].lastOrderAt).toBeNull();
+    expect(agents[1].lastOrderAt).toBe(order.createdAt);
+    expect((await t.call("GET", "/v1/agents", key)).status).toBe(403);
+
+    await t.ok("POST", `/v1/agents/${agents[1].id}/revoke`, alice.token);
+    expect((await t.call("GET", "/v1/me", cli)).status).toBe(401);
+    expect((await t.ok("GET", "/v1/me", key)).actor).toBe("agent");
+    expect((await t.ok("GET", "/v1/agents", alice.token)).map((a: { label: string }) => a.label)).toEqual(["cursor"]);
+
+    // Other accounts' agents and the owner token itself are out of reach.
+    const bob = await t.account("bob");
+    expect((await t.call("POST", `/v1/agents/${agents[0].id}/revoke`, bob.token)).status).toBe(404);
+  });
+
   it("does not let an agent approve logins or change its owner's rules", async () => {
     const t = await setup();
     const alice = await t.account("alice");

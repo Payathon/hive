@@ -25,6 +25,8 @@ export type Actor = "human" | "agent";
 export interface Principal {
   accountId: string;
   actor: Actor;
+  // tokens.id of the credential used.
+  tokenId: string;
 }
 
 export class HiveError extends Error {
@@ -89,14 +91,14 @@ export class Hive {
     const token = newToken();
     await this.db.transaction(async (tx) => {
       await tx.insert(accounts).values({ id, name, createdAt: this.now() });
-      await tx.insert(tokens).values({ tokenHash: sha256(token), accountId: id, actor: "human", label: "signup" });
+      await tx.insert(tokens).values({ tokenHash: sha256(token), id: newId("tok"), accountId: id, actor: "human", label: "signup" });
     });
     return { accountId: id, token };
   }
 
   async authenticate(token: string): Promise<Principal | null> {
     const [row] = await this.db
-      .select({ accountId: tokens.accountId, actor: tokens.actor })
+      .select({ accountId: tokens.accountId, actor: tokens.actor, tokenId: tokens.id })
       .from(tokens)
       .where(and(eq(tokens.tokenHash, sha256(token)), isNull(tokens.revokedAt)));
     return row ?? null;
@@ -115,8 +117,18 @@ export class Hive {
   async createApiKey(p: Principal, label: string | null) {
     if (p.actor !== "human") throw new HiveError(403, "humans_only", "only the account owner can create API keys");
     const key = newToken();
-    await this.db.insert(tokens).values({ tokenHash: sha256(key), accountId: p.accountId, actor: "agent", label });
+    await this.db
+      .insert(tokens)
+      .values({ tokenHash: sha256(key), id: newId("tok"), accountId: p.accountId, actor: "agent", label, source: "api_key" });
     return { key };
+  }
+
+  // What the approval page shows before the owner says yes.
+  async describeDeviceLogin(p: Principal, userCode: string) {
+    if (p.actor !== "human") throw new HiveError(403, "humans_only", "only the account owner can approve an agent");
+    const [dl] = await this.db.select().from(deviceLogins).where(eq(deviceLogins.userCode, userCode.toUpperCase()));
+    if (!dl || (!dl.accountId && dl.expiresAt < this.now())) throw new HiveError(404, "login_not_found", "unknown or expired code");
+    return { userCode: dl.userCode, label: dl.label, expiresAt: dl.expiresAt, approved: dl.accountId !== null };
   }
 
   // Called by a signed-in human to bind the waiting CLI to their account as an agent.
@@ -127,7 +139,9 @@ export class Hive {
       const [dl] = await tx.select().from(deviceLogins).where(eq(deviceLogins.userCode, userCode.toUpperCase())).for("update");
       if (!dl || dl.expiresAt < this.now()) throw new HiveError(404, "login_not_found", "unknown or expired code");
       if (dl.accountId) throw new HiveError(409, "login_used", "this code was already approved");
-      await tx.insert(tokens).values({ tokenHash: sha256(token), accountId: p.accountId, actor: "agent", label: dl.label });
+      await tx
+        .insert(tokens)
+        .values({ tokenHash: sha256(token), id: newId("tok"), accountId: p.accountId, actor: "agent", label: dl.label, source: "login" });
       await tx.update(deviceLogins).set({ accountId: p.accountId, pendingToken: token }).where(eq(deviceLogins.id, dl.id));
     });
   }
@@ -144,6 +158,29 @@ export class Hive {
       if (dl.expiresAt < this.now()) throw new HiveError(404, "login_expired", "login expired");
       return { status: "pending" };
     });
+  }
+
+  // The owner's view of every live agent credential, with when each last ordered.
+  async listAgents(p: Principal) {
+    if (p.actor !== "human") throw new HiveError(403, "humans_only", "only the account owner can manage agents");
+    const lastOrderAt = sql<Date | null>`max(${orders.createdAt})`.mapWith(orders.createdAt);
+    return this.db
+      .select({ id: tokens.id, label: tokens.label, source: tokens.source, createdAt: tokens.createdAt, lastOrderAt })
+      .from(tokens)
+      .leftJoin(orders, eq(orders.createdByToken, tokens.id))
+      .where(and(eq(tokens.accountId, p.accountId), eq(tokens.actor, "agent"), isNull(tokens.revokedAt)))
+      .groupBy(tokens.id, tokens.label, tokens.source, tokens.createdAt)
+      .orderBy(desc(tokens.createdAt));
+  }
+
+  async revokeAgent(p: Principal, tokenId: string) {
+    if (p.actor !== "human") throw new HiveError(403, "humans_only", "only the account owner can manage agents");
+    const revoked = await this.db
+      .update(tokens)
+      .set({ revokedAt: this.now() })
+      .where(and(eq(tokens.id, tokenId), eq(tokens.accountId, p.accountId), eq(tokens.actor, "agent"), isNull(tokens.revokedAt)))
+      .returning({ id: tokens.id });
+    if (revoked.length === 0) throw new HiveError(404, "agent_not_found", "no such agent");
   }
 
   async getAccount(accountId: string) {
@@ -239,6 +276,7 @@ export class Hive {
       capabilityType: type,
       buyerAccountId: p.accountId,
       createdByActor: p.actor,
+      createdByToken: p.tokenId,
       input: order.input as object,
       maxPriceFen,
       ...orderColumns(order),

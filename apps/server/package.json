@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/main.ts",
+    "dev": "WEB_URL=${WEB_URL:-http://localhost:5173} tsx watch src/main.ts",
     "start": "tsx src/main.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",

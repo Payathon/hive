@@ -35,7 +35,9 @@ const db = process.env.DATABASE_URL
   : await connectPglite(process.env.PGLITE_DIR ?? ".data/pglite");
 
 const hive = new Hive({ db, payments: paymentsFromEnv() });
-const app = createApp(hive);
+// WEB_URL points approval links at the Vite dev server in development; otherwise the API's own origin serves the web app.
+const webUrl = process.env.WEB_URL ?? process.env.PUBLIC_URL;
+const app = createApp(hive, webUrl ? { webUrl } : {});
 
 // Serves the built web app (apps/web) from the same origin when it has been built.
 const webDist = process.env.WEB_DIST ?? "../web/dist";

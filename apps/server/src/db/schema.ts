@@ -30,12 +30,16 @@ export const accounts = pgTable("accounts", {
 
 export const tokens = pgTable("tokens", {
   tokenHash: text("token_hash").primaryKey(),
+  // Public handle for listing and revoking without exposing the hash.
+  id: text("id").notNull().unique(),
   accountId: text("account_id")
     .notNull()
     .references(() => accounts.id),
   // Who drives the account with this token; orders record it ("由 agent 发起").
   actor: text("actor", { enum: ["human", "agent"] }).notNull(),
   label: text("label"),
+  // How an agent token was issued; null for owner tokens.
+  source: text("source", { enum: ["login", "api_key"] }),
   createdAt: ts("created_at").notNull().defaultNow(),
   revokedAt: ts("revoked_at"),
 });
@@ -83,6 +87,8 @@ export const orders = pgTable(
       .notNull()
       .references(() => accounts.id),
     createdByActor: text("created_by_actor", { enum: ["human", "agent"] }).notNull(),
+    // tokens.id of the caller, so the owner can see what each agent ordered.
+    createdByToken: text("created_by_token"),
     input: jsonb("input").notNull(),
     maxPriceFen: integer("max_price_fen"),
     status: text("status").notNull(),
