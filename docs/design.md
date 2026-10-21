@@ -111,12 +111,24 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 买家也可以走 MCP，工具相同（`hive_order`、`hive_pay`、`hive_status` 等），不提供 approve 工具，agent 不能批准自己的登录。接单只走 `hive serve`，因为接单器得常驻本地进程。
 
+### agent 授权
+
+参照 OAuth 设备授权（RFC 8628，`gh auth login` 同款）：
+
+- agent 执行 `hive login`（或本地 MCP 的 `hive_login`），拿到一个**授权链接** `<网页>/approve?code=XXXX`，转给主人。主人点开，看到"「某 agent」想代表你下单"，点同意。人不用输码，`hive approve <code>` 只留给用 owner token 的高级用法。
+- **同意一次长期有效**。花钱的同意落在每一笔支付宝付款上，所以授权本身不再按单确认，避免人点两次。
+- 每个 agent 拿到自己的凭证，挂在主人名下，可单独撤销；订单记录是哪个凭证下的，主人能看到每个 agent 最近一次下单。
+- 链接的网页地址取 `WEB_URL`，没有就取 `PUBLIC_URL`，再没有就用请求进来的地址；开发时 `pnpm dev` 把它指向 Vite（5173）。
+- 授权页只在点开链接时出现，网页上没有常驻的"绑定 agent"入口，免得人不知道要绑什么。
+
+接入方式：
+
 - **远程**：服务端 `/mcp`（Streamable HTTP，无状态），用 API key 鉴权。API key 由主人 `hive api-key` 生成，是 agent 身份的 token。国内 MCP 普遍用 API key；OAuth（claude.ai 网页版等需要）**[待定]**，认人一步以后接支付宝登录。
 - **本地**：`hive mcp`（stdio），登录状态与 CLI 共用 `~/.hive`。
 
 | 命令 | 作用 |
 |---|---|
-| `hive login` | 打开浏览器，人登录并授权，把 agent 绑定到账号 |
+| `hive login` | 打印授权链接，主人点开同意后，把 agent 绑定到账号 |
 | `hive types` | 查看能力目录 |
 | `hive order <type> --input …` | 发任务 |
 | `hive pay <order>` | 取得购买入口交给人确认 |
@@ -159,7 +171,8 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 - **市场**：能力目录，展开看各卖家的价格、在线状态、通过率；待付款提醒；人直接下单
 - **订单**：我买的 / 我卖的；订单详情页按状态显示大金额、时间线、交付内容和操作（付款、确认收货、开始干活、交付）
 - **接单**：圆形开关上线听单（页面长轮询 `/v1/seller/poll`，同时充当心跳），派单从底部弹出带倒计时，抢单；上架能力并开通收款
-- **我的**：账单、给 agent 的规矩（单笔/每日上限、暂停）、绑定 agent（`hive login` 的验证码）、生成 API key
+- **我的**：账单、给 agent 的规矩（单笔/每日上限、暂停）、**我的 agent**（已授权的 agent：名字、授权方式和时间、最近一次下单，逐个可撤销；一个都没有时不显示）。生成 API key 放在页面底部的一个小链接，生成的 key 也出现在"我的 agent"里
+- **授权页** `/approve`：只从 agent 发来的链接进入（未登录先注册/登录再回来），显示是哪个 agent 在请求，一键同意
 
 登录：网页注册只要名字，返回的 owner token 存在浏览器里；也可以粘贴 CLI 的 owner token。**[待定]** 换成支付宝登录。
 
@@ -192,6 +205,7 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 
 | 事项 | 说明 |
 |---|---|
+| 卖家侧 agent 形态 | 卖家的 agent 是什么、在哪个工作目录跑、全自动还是要人介入（HITL），以及线下要人做的任务（如拍照）怎么接，都还没想清楚，所以卖家侧的注册/授权流程暂不改动，现状仍是 `hive serve` + owner token |
 | 即刻收合作平台资格 | 即刻收目前只开放给合作平台，hive 需申请；需找主办方确认 |
 | 退款 | 已预留独立的 `refunds` 实体和支付适配层 `refund()`；待研究即刻收下的退款方式及触发规则 |
 | 授权额度内免确认 | Agent Pay 的"用户授权范围内"是否支持免确认；若支持可做小额加分项 |
