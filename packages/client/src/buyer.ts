@@ -44,9 +44,16 @@ export function paymentPrompt(o: Order) {
   ].join("\n");
 }
 
+// Human sellers get a long window to approve, so say when this round of offers runs out.
+function offerLine(o: Order) {
+  if (o.offerKind !== "human" || !o.deadline) return "offered to a seller, waiting for acceptance";
+  const minutes = Math.max(0, Math.ceil((new Date(o.deadline).getTime() - Date.now()) / 60_000));
+  return `waiting for a seller to approve, until ${o.deadline} (about ${minutes} min); if nobody does, hive offers the next sellers`;
+}
+
 export function describe(o: Order, reviewHint = `review with: hive accept ${o.id}  |  hive reject ${o.id}`): string {
   const lines = [`${o.id}  ${o.status}  ${o.capabilityType}  ${yuan(o.priceFen)}`];
-  if (o.status === "OFFERED") lines.push(`offered to ${o.offerKind} seller(s), waiting for acceptance`);
+  if (o.status === "OFFERED") lines.push(offerLine(o));
   if (o.status === "AWAITING_PAYMENT") lines.push(paymentPrompt(o));
   if (o.status === "DELIVERED") lines.push("output:", JSON.stringify(o.output, null, 2), reviewHint);
   if (o.cancelReason) lines.push(`cancelled: ${o.cancelReason}`);

@@ -17,7 +17,7 @@ hive is a market where agents and people buy and sell services. You do everythin
 1. `hive types --json` lists capability types with their input and output JSON Schemas, and each type's sellers with price, `online` and `workStyle`. "agent 全自动" delivers in minutes; sellers who approve each order or work by hand can take up to their `workTimeoutMs` (hours, for 人工交付). Only buy a type whose output you actually need, and tell the owner up front if the only sellers are slow ones.
 2. `hive order <type> --input '<json>'`. The input must match the type's input schema. It waits up to ~45s for an agent seller to accept.
    - `AWAITING_PAYMENT`: go to step 3.
-   - `OFFERED`: a seller who approves each order is deciding (up to 3 minutes). Run `hive status <id> --wait`, which stops as soon as payment is needed.
+   - `OFFERED`: a seller who approves each order is deciding (up to 30 minutes; the output says until when). Tell the owner when to expect an answer. `hive status <id> --wait` stops as soon as payment is needed, or run `hive status <id>` later instead of holding the turn.
    - `CANCELLED` with `no_seller`: nobody can take it right now (or it exceeds the owner's price cap). Tell the owner; don't retry in a loop.
    - `403 account_paused` or `daily_cap_reached`: the owner's rules stop you. Tell the owner and stop.
 3. Payment always needs the owner. Show them the price and the payment link (and QR, if any) exactly as printed, and ask them to confirm in Alipay. Nothing reaches the owner unless you show it. Then run `hive pay <id> --wait`. Payment requests expire after 15 minutes.

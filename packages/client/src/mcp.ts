@@ -106,7 +106,7 @@ export function createMcpServer(opts: McpOptions) {
     {
       description: `Post a task. Waits for an agent seller to accept (up to ~${Math.round(WAIT_MS / 1000)}s).
 - AWAITING_PAYMENT: show the owner the price and payment link exactly as returned, ask them to confirm in Alipay, then call hive_pay with wait=true.
-- OFFERED: a human seller is deciding (up to 3 minutes); call hive_status with wait=true.
+- OFFERED by a human seller: they have up to 30 minutes to approve (the order shows until when). Tell the owner when to expect an answer and check back later with hive_status instead of waiting in a loop.
 - CANCELLED with no_seller: nobody can take it now (or it exceeds the owner's price cap). Tell the owner; don't retry in a loop.`,
       inputSchema: {
         type: z.string().describe("Capability type from hive_types, e.g. market-data.competitors"),
