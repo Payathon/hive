@@ -482,6 +482,14 @@ describe("delivered files", () => {
     return { t, h, buyer, o };
   }
 
+  it("starts a paid order the seller delivers without marking it started", async () => {
+    const { t, h, o } = await paidPhotoOrder();
+    const a = (await t.upload(h.token, o.id, "a.jpg", "image/jpeg", "a")).body;
+    const b = (await t.upload(h.token, o.id, "b.jpg", "image/jpeg", "b")).body;
+    const done = await t.ok("POST", `/v1/orders/${o.id}/deliver`, h.token, { files: [a.id, b.id] });
+    expect(done.status).toBe("DELIVERED");
+  });
+
   it("checks the count and type, then serves the files sandboxed", async () => {
     const { t, h, buyer, o } = await paidPhotoOrder();
     const a = (await t.upload(h.token, o.id, "门头.jpg", "image/jpeg", "jpeg-bytes")).body;

@@ -477,7 +477,12 @@ export class Hive {
   }
 
   async deliver(p: Principal, orderId: string, req: DeliveryRequest) {
-    const row = await this.requireSeller(p, orderId);
+    let row = await this.requireSeller(p, orderId);
+    // Delivering a paid order the seller never marked as started starts it first.
+    if (row.status === "PAID") {
+      await this.apply(orderId, { type: "work_started" });
+      row = await this.requireSeller(p, orderId);
+    }
     if (row.status !== "IN_PROGRESS") throw new HiveError(409, "not_in_progress", `order is ${row.status}`);
     const order = rowToOrder(row);
     const output = await this.resolveDelivery(orderId, req);
