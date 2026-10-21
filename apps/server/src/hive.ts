@@ -11,6 +11,7 @@ import {
   newOrder,
   needsListener,
   nextOffer,
+  TIMEOUTS,
   transition,
   workStyle,
   workTimeoutMs,
@@ -778,7 +779,7 @@ export class Hive {
     switch (event.type) {
       case "offer":
         for (const s of event.sellerAccountIds) {
-          if (event.kind === "human") await this.notify(s, "offer", row.id, `新任务：${title}，3 分钟内有效`);
+          if (event.kind === "human") await this.notify(s, "offer", row.id, `新任务：${title}，${TIMEOUTS.offer.human / 60_000} 分钟内有效`);
           else this.bus.emit(s);
         }
         break;

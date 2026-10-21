@@ -60,6 +60,14 @@ describe("offers", () => {
     expect(next.passedBy).toEqual(["s1"]);
   });
 
+  it("gives a human broadcast 30 minutes before moving on", () => {
+    const o = apply(base(), { type: "dispatch" }, { type: "offer", sellerAccountIds: ["h1", "h2"], kind: "human" });
+    expect(expiryEvent(o, at(30 * 60_000 - 1))).toBeNull();
+    const next = apply(o, expiryEvent(o, at(30 * 60_000))!);
+    expect(next.status).toBe("DISPATCHING");
+    expect(next.passedBy).toEqual(["h1", "h2"]);
+  });
+
   it("keeps a human broadcast open until every holder declines", () => {
     let o = apply(base(), { type: "dispatch" }, { type: "offer", sellerAccountIds: ["h1", "h2"], kind: "human" });
     o = apply(o, { type: "seller_decline", sellerAccountId: "h1" });

@@ -23,7 +23,8 @@ const SECOND = 1000;
 const MINUTE = 60 * SECOND;
 
 export const TIMEOUTS = {
-  offer: { agent: 30 * SECOND, human: 3 * MINUTE },
+  // `ask` sellers needn't sit at a screen, so they get a long window to approve.
+  offer: { agent: 30 * SECOND, human: 30 * MINUTE },
   payment: 15 * MINUTE,
   acceptance: 30 * MINUTE,
 } as const;
