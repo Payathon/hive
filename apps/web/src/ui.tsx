@@ -82,7 +82,13 @@ export function usePoll<T>(load: () => Promise<T>, ms: number, deps: unknown[] =
     const t = setInterval(() => {
       if (document.visibilityState === "visible") void reload();
     }, ms);
-    return () => clearInterval(t);
+    // Coming back to the tab (or the PWA) shows what changed while it was hidden.
+    const onShow = () => document.visibilityState === "visible" && void reload();
+    document.addEventListener("visibilitychange", onShow);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onShow);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reload, ms, ...deps]);
   return { data, error, reload };

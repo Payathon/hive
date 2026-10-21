@@ -129,7 +129,7 @@ export function timeline(o: OrderDetail, role: "buyer" | "seller"): Step[] {
       label: you ? `${seller} 开始干活` : "开始干活",
       at: last("work_started"),
       done: reached(["IN_PROGRESS", "DELIVERED", "COMPLETED"]),
-      now: you ? "卖家马上开始" : "点“开始干活”",
+      now: you ? "卖家马上开始" : "做完直接在上面交付",
     },
     {
       label: you ? `${seller} 交付了` : "交付",

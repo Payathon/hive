@@ -45,7 +45,7 @@ function statusLine(o: OrderDetail, role: Role, now: number): string {
     case "AWAITING_PAYMENT":
       return buyer ? `请在 ${left} 内付款，超时自动取消` : `等买家付款，${left} 后超时取消`;
     case "PAID":
-      return buyer ? "钱已直接付给卖家，等卖家开始" : "买家已付款，可以开始了";
+      return buyer ? "钱已直接付给卖家，等卖家开始" : "买家已付款，做完在下面交付";
     case "IN_PROGRESS":
       return `${left} 内交付`;
     case "DELIVERED":
@@ -96,6 +96,30 @@ function DataView({ data }: { data: unknown }) {
   return <pre className="json">{JSON.stringify(data, null, 2)}</pre>;
 }
 
+// Folds long deliveries so the review buttons stay in reach on a phone.
+function Folded({ long, children }: { long: boolean; children: ReactNode }) {
+  const [open, setOpen] = useState(false);
+  if (!long) return <>{children}</>;
+  return (
+    <>
+      <div className={open ? undefined : "folded"}>{children}</div>
+      <button className="link blue" type="button" onClick={() => setOpen(!open)}>{open ? "收起" : "展开全部"}</button>
+    </>
+  );
+}
+
+// A seller's note as plain text, with fenced code blocks set apart. No markup is interpreted.
+function Note({ text }: { text: string }) {
+  const parts = text.split(/```[\w-]*\n?([\s\S]*?)```/g);
+  return (
+    <Folded long={text.length > 500}>
+      {parts.map((part, i) =>
+        i % 2 ? <pre key={i} className="json">{part.trimEnd()}</pre> : part.trim() && <p key={i} className="note">{part.trim()}</p>,
+      )}
+    </Folded>
+  );
+}
+
 function Deliverable({ o }: { o: OrderDetail }) {
   const out = o.output;
   if (!out) return null;
@@ -105,8 +129,8 @@ function Deliverable({ o }: { o: OrderDetail }) {
   return (
     <div className="card">
       <h4><span>交付内容</span><small>{out.files.length ? `${out.files.length} 个文件` : ""}</small></h4>
-      {out.note && <p className="note">{out.note}</p>}
-      {out.data !== null && <DataView data={out.data} />}
+      {out.note && <Note text={out.note} />}
+      {out.data !== null && <Folded long={JSON.stringify(out.data).length > 800}><DataView data={out.data} /></Folded>}
       {images.length > 0 && (
         <div className="photos" style={{ marginTop: 8 }}>
           {images.map((f) => (
@@ -271,8 +295,9 @@ export function OrderPage() {
       );
     if (isTerminal(o)) actions = <Link className="btn line" style={{ textAlign: "center" }} to={`/buy/${o.category}`}>再来一单</Link>;
   } else {
+    // Delivering starts the order anyway; this only tells the buyer someone is on it.
     if (o.status === "PAID")
-      actions = <button className="btn" type="button" disabled={busy} onClick={() => act("start", undefined, "开始干活")}>开始干活</button>;
+      actions = <button className="link" type="button" disabled={busy} onClick={() => act("start", undefined, "已告诉买家你开始了")}>先告诉买家我开始了</button>;
     if (o.status === "IN_PROGRESS")
       actions = <button className="link" type="button" disabled={busy} onClick={() => window.confirm("放弃后订单失败，买家的钱已经付给你了。确定放弃吗？") && act("abandon", undefined, "已放弃")}>放弃这单</button>;
   }
@@ -303,7 +328,7 @@ export function OrderPage() {
       )}
 
       {(o.status === "DELIVERED" || o.status === "COMPLETED") && <Deliverable o={o} />}
-      {role === "seller" && o.status === "IN_PROGRESS" && <DeliverForm o={o} onDone={() => void reload()} />}
+      {role === "seller" && (o.status === "PAID" || o.status === "IN_PROGRESS") && <DeliverForm o={o} onDone={() => void reload()} />}
 
       <div className="card">
         <h4>订单进度</h4>
@@ -320,7 +345,7 @@ export function OrderPage() {
               <dt>卖家</dt>
               <dd>
                 {o.sellerName ?? "派单中"}
-                {o.sellerName && o.offerKind && <span className={`tag${o.offerKind === "human" ? " person" : ""}`}>{o.offerKind === "human" ? "真人" : "agent"}</span>}
+                {o.sellerName && o.sellerWorkMode && <span className={`tag${o.sellerWorkMode === "manual" ? " person" : ""}`}>{o.sellerWorkMode === "manual" ? "真人" : "agent"}</span>}
               </dd>
             </>
           )}
