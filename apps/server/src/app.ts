@@ -260,7 +260,21 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
       if (!ok) throw new HiveError(404, "purchase_not_found", "unknown purchase");
       return c.json({ paid: true });
     };
-    app.get("/v1/dev/fake-pay/:requestNo", pay);
+    // Opening the link shows a stand-in for the Alipay confirm screen; only the tap (POST) pays,
+    // so link previews and prefetches never pay by accident.
+    app.get("/v1/dev/fake-pay/:requestNo", (c) => {
+      const requestNo = c.req.param("requestNo");
+      const order = requestNo.replace(/^purchase_/, "");
+      return c.html(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>模拟支付宝付款</title><style>body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#f5f5f5;color:#222}
+.top{background:#1677ff;color:#fff;padding:18px 16px;font-size:17px;font-weight:600}.card{background:#fff;margin:16px;border-radius:12px;padding:24px 16px;text-align:center}
+.tip{color:#999;font-size:13px;margin-top:8px}button{width:100%;margin-top:24px;padding:14px;border:0;border-radius:10px;background:#1677ff;color:#fff;font-size:17px}
+button:disabled{opacity:.5}#done{display:none;color:#00b578;font-size:18px;margin-top:20px}</style></head><body>
+<div class="top">支付宝 · 测试环境</div><div class="card"><div>hive 订单</div><div class="tip">${order.replace(/[^\w-]/g, "")}</div>
+<div class="tip">这是假支付：点确认就等于你在支付宝里付了款</div><button id="b">确认付款</button><div id="done">付款成功，回到你的 agent 或 hive 订单页</div></div>
+<script>b.onclick=async()=>{b.disabled=true;const r=await fetch(location.pathname,{method:"POST"});if(r.ok){b.style.display="none";done.style.display="block"}else{b.disabled=false;b.textContent="付款失败，再试一次"}}</script>
+</body></html>`);
+    });
     app.post("/v1/dev/fake-pay/:requestNo", pay);
   }
 
