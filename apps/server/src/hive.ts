@@ -578,7 +578,14 @@ export class Hive {
       .from(orderEvents)
       .where(eq(orderEvents.orderId, orderId))
       .orderBy(orderEvents.id);
-    return { ...order, sellerName: seller?.name ?? null, events };
+    // Who does the work, from the seller's listing: an approved order can still be done by their agent.
+    const [listing] = order.sellerAccountId
+      ? await this.db
+          .select({ workMode: listings.workMode })
+          .from(listings)
+          .where(and(eq(listings.sellerAccountId, order.sellerAccountId), eq(listings.category, order.category)))
+      : [];
+    return { ...order, sellerName: seller?.name ?? null, sellerWorkMode: listing?.workMode ?? null, events };
   }
 
   // Public catalog: every category with its sellable listings, cheapest and most reliable first.

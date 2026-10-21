@@ -35,6 +35,7 @@ export type OrderStatus =
 export type OrderSummary = Omit<Order, "status"> & { status: OrderStatus; createdAt: string };
 export interface OrderDetail extends OrderSummary {
   sellerName: string | null;
+  sellerWorkMode: "agent" | "manual" | null;
   events: { type: string; at: string }[];
 }
 
