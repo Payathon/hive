@@ -3,8 +3,7 @@ import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { HiveClient } from "@hive/client/api";
 import { createMcpServer } from "@hive/client/mcp";
-import { capabilityTypes } from "@hive/core";
-import { Hive, HiveError, type Principal } from "./hive.ts";
+import { Hive, HiveError, MAX_FILE_BYTES, type Principal } from "./hive.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 
 type Env = { Variables: { principal: Principal } };
@@ -42,22 +41,22 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
 
   // ---- public -----------------------------------------------------------
 
-  // Schemas plus who sells each type and how they work, so a buyer agent can choose before ordering.
-  app.get("/v1/types", async (c) => {
-    const sellers = new Map((await hive.market()).map((m) => [m.type, m.sellers]));
-    return c.json(
-      Object.entries(capabilityTypes).map(([type, t]) => ({
-        type,
-        title: t.title,
-        workTimeoutMs: t.workTimeoutMs,
-        input: z.toJSONSchema(t.input),
-        output: z.toJSONSchema(t.output),
-        sellers: sellers.get(type) ?? [],
-      })),
-    );
-  });
+  // Categories plus who sells in each and how they work, so a buyer (or their agent) can choose before ordering.
+  app.get("/v1/categories", async (c) => c.json(await hive.market()));
 
-  app.get("/v1/market", async (c) => c.json(await hive.market()));
+  // Delivered files. The unguessable id is the key, so links work in <img> and for agents without a token.
+  // Sandboxed so an uploaded HTML or SVG can't run as the web app.
+  app.get("/v1/files/:id", async (c) => {
+    const { meta, bytes } = await hive.readFile(c.req.param("id"));
+    return c.body(bytes as Uint8Array<ArrayBuffer>, 200, {
+      "content-type": meta.mime,
+      "content-length": String(meta.size),
+      "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(meta.name)}`,
+      "content-security-policy": "sandbox",
+      "x-content-type-options": "nosniff",
+      "cache-control": "private, max-age=31536000, immutable",
+    });
+  });
 
   // Sign-up takes only a name; the token it returns is the owner's login.
   app.post("/v1/accounts", async (c) => {
@@ -88,7 +87,11 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
     if (!principal) throw new HiveError(401, "unauthorized", "send an API key from `hive api-key` as a Bearer token");
     if (principal.actor !== "agent") throw new HiveError(403, "agents_only", "use an API key from `hive api-key`, not the owner token");
     const client = new HiveClient("http://hive.internal", key!, (url, init) => Promise.resolve(app.fetch(new Request(url, init))));
-    const server = createMcpServer({ client: async () => client, unauthorizedHint: "The API key was revoked; ask the owner for a new one." });
+    const server = createMcpServer({
+      client: async () => client,
+      publicUrl: new URL(c.req.url).origin,
+      unauthorizedHint: "The API key was revoked; ask the owner for a new one.",
+    });
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
     await server.connect(transport);
     return transport.handleRequest(c.req.raw);
@@ -153,7 +156,7 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
 
   authed.get("/listings", async (c) => c.json(await hive.myListings(me(c).accountId)));
 
-  authed.put("/listings/:type", async (c) => {
+  authed.put("/listings/:category", async (c) => {
     const opts = await body(
       c,
       z.object({
@@ -161,14 +164,16 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
         workMode: z.enum(["agent", "manual"]).optional(),
         deliveryHours: z.number().int().positive().max(24 * 30).nullable().optional(),
         dailyLimit: z.number().int().positive().max(10_000),
+        tags: z.array(z.string().max(20)).max(10).optional(),
+        intro: z.string().max(200).nullable().optional(),
         active: z.boolean().optional(),
       }),
     );
-    return c.json(await hive.upsertListing(me(c), c.req.param("type"), opts));
+    return c.json(await hive.upsertListing(me(c), c.req.param("category"), opts));
   });
 
-  authed.post("/listings/:type/payment-setup", async (c) =>
-    c.json(await hive.setupListingPayment(me(c), c.req.param("type"))),
+  authed.post("/listings/:category/payment-setup", async (c) =>
+    c.json(await hive.setupListingPayment(me(c), c.req.param("category"))),
   );
 
   authed.post("/seller/accepting", async (c) => {
@@ -184,8 +189,17 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
   });
 
   authed.post("/orders", async (c) => {
-    const { type, input } = await body(c, z.object({ type: z.string(), input: z.unknown() }));
-    return c.json(await hive.createOrder(me(c), type, input), 201);
+    const req = await body(
+      c,
+      z.object({
+        category: z.string(),
+        brief: z.string().trim().min(1).max(4000),
+        input: z.unknown().optional(),
+        // Validated in full by the service; see checkDeliverySpec.
+        delivery: z.unknown().default({ kind: "any" }),
+      }),
+    );
+    return c.json(await hive.createOrder(me(c), req), 201);
   });
 
   authed.get("/orders", async (c) => {
@@ -203,9 +217,25 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
   });
   authed.post("/orders/:id/start", async (c) => c.json(await hive.startWork(me(c), c.req.param("id"))));
   authed.post("/orders/:id/abandon", async (c) => c.json(await hive.abandon(me(c), c.req.param("id"))));
+  // Raw upload: the body is the file, its type is the content-type, its name the `name` query.
+  authed.post("/orders/:id/files", async (c) => {
+    const size = Number(c.req.header("content-length") ?? 0);
+    if (size > MAX_FILE_BYTES) throw new HiveError(400, "file_too_large", `files are limited to ${MAX_FILE_BYTES / 1024 / 1024} MB`);
+    const bytes = new Uint8Array(await c.req.arrayBuffer());
+    const file = { name: c.req.query("name") ?? "file", mime: c.req.header("content-type") ?? "application/octet-stream", bytes };
+    return c.json(await hive.uploadFile(me(c), c.req.param("id"), file), 201);
+  });
+
   authed.post("/orders/:id/deliver", async (c) => {
-    const { output } = await body(c, z.object({ output: z.unknown() }));
-    return c.json(await hive.deliver(me(c), c.req.param("id"), output));
+    const req = await body(
+      c,
+      z.object({
+        note: z.string().max(10_000).nullable().optional(),
+        data: z.unknown().optional(),
+        files: z.array(z.string()).max(50).optional(),
+      }),
+    );
+    return c.json(await hive.deliver(me(c), c.req.param("id"), req));
   });
   authed.post("/orders/:id/verdict", async (c) => {
     const { verdict } = await body(c, z.object({ verdict: z.enum(["accepted", "rejected"]) }));

@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { BASE, inputs, setup, validOutputs } from "./test-helpers.ts";
-
-const DATA = "market-data.competitors";
-const PHOTO = "photo.onsite";
+import { BASE, DATA, orders, PHOTO, setup, validDelivery } from "./test-helpers.ts";
 
 describe("accounts and auth", () => {
   it("rejects requests without a valid token", async () => {
@@ -42,7 +39,7 @@ describe("accounts and auth", () => {
     const alice = await t.account("alice");
     const cli = await t.agentToken(alice.token);
     const { key } = await t.ok("POST", "/v1/api-keys", alice.token, { label: "cursor" });
-    const order = await t.ok("POST", "/v1/orders", cli, { type: DATA, input: inputs[DATA] });
+    const order = await t.ok("POST", "/v1/orders", cli, orders[DATA]);
 
     const agents = await t.ok("GET", "/v1/agents", alice.token);
     expect(agents.map((a: { label: string; source: string }) => [a.label, a.source])).toEqual([
@@ -114,15 +111,18 @@ describe("remote MCP", () => {
   });
 });
 
-it("lists capability types with JSON schemas and how each seller works", async () => {
+it("lists the categories and how each seller in them works", async () => {
   const t = await setup();
-  await t.agentSeller("data-agent", DATA);
+  await t.agentSeller("data-agent", DATA, 500, ["奶茶"]);
   await t.humanSeller("wang", PHOTO, 1500, { deliveryHours: 3 });
-  const types = await t.ok("GET", "/v1/types");
-  expect(types.map((x: { type: string }) => x.type)).toEqual([DATA, "chart.compare", PHOTO]);
-  expect(types[0].input.type).toBe("object");
-  expect(types[0].sellers[0]).toMatchObject({ name: "data-agent", workStyle: "agent 全自动", workTimeoutMs: 10 * 60_000 });
-  expect(types[2].sellers[0]).toMatchObject({ name: "wang", workStyle: "需卖家审批 · 人工交付 · 3 小时内", workTimeoutMs: 3 * 3600_000 });
+  const cats = await t.ok("GET", "/v1/categories");
+  expect(cats).toHaveLength(20);
+  expect(cats.map((c: { id: string }) => c.id).slice(0, 3)).toEqual([DATA, "data.research", "data.cleaning"]);
+  const byId = Object.fromEntries(cats.map((c: { id: string }) => [c.id, c]));
+  expect(byId[DATA]).toMatchObject({ title: "竞品/市场数据", workTimeoutMs: 10 * 60_000, manualTimeoutMs: 24 * 3600_000 });
+  expect(byId[DATA].tags).toContain("竞品");
+  expect(byId[DATA].sellers[0]).toMatchObject({ name: "data-agent", tags: ["奶茶"], workStyle: "agent 全自动", workTimeoutMs: 10 * 60_000 });
+  expect(byId[PHOTO].sellers[0]).toMatchObject({ name: "wang", workStyle: "需卖家审批 · 人工交付 · 3 小时内", workTimeoutMs: 3 * 3600_000 });
 });
 
 it("lists priced listings in the market, cheapest first, with presence", async () => {
@@ -133,13 +133,13 @@ it("lists priced listings in the market, cheapest first, with presence", async (
   await t.ok("POST", "/v1/seller/accepting", human.token, { on: false });
   await t.ok("PUT", `/v1/listings/${DATA}`, (await t.account("unpriced")).token, { acceptMode: "auto", dailyLimit: 1 });
 
-  const market = await t.ok("GET", "/v1/market");
-  const byType = Object.fromEntries(market.map((m: { type: string }) => [m.type, m]));
-  expect(byType[DATA].title).toBe("竞品门店数据");
+  const market = await t.ok("GET", "/v1/categories");
+  const byType = Object.fromEntries(market.map((m: { id: string }) => [m.id, m]));
+  expect(byType[DATA].title).toBe("竞品/市场数据");
   expect(byType[DATA].sellers.map((s: { name: string }) => s.name)).toEqual(["cheap", "pricey"]);
   expect(byType[DATA].sellers[0]).toMatchObject({ workMode: "agent", acceptMode: "auto", priceFen: 300, online: true, completed: 0, passRate: null });
   expect(byType[PHOTO].sellers[0]).toMatchObject({ name: "wang", workMode: "manual", acceptMode: "ask", online: false });
-  expect(byType["chart.compare"].sellers).toEqual([]);
+  expect(byType["design.chart"].sellers).toEqual([]);
 });
 
 describe("the full agent-to-agent order", () => {
@@ -149,7 +149,7 @@ describe("the full agent-to-agent order", () => {
     const buyer = await t.account("xiaowang");
     const buyerAgent = await t.agentToken(buyer.token);
 
-    const created = await t.ok("POST", "/v1/orders", buyerAgent, { type: DATA, input: inputs[DATA] });
+    const created = await t.ok("POST", "/v1/orders", buyerAgent, orders[DATA]);
     expect(created.status).toBe("OFFERED");
     expect(created.createdByActor).toBe("agent");
 
@@ -171,9 +171,9 @@ describe("the full agent-to-agent order", () => {
     expect(work.work.map((o: { id: string }) => o.id)).toEqual([created.id]);
     await t.ok("POST", `/v1/orders/${created.id}/start`, seller.agent);
 
-    const bad = await t.call("POST", `/v1/orders/${created.id}/deliver`, seller.agent, { output: { nope: 1 } });
+    const bad = await t.call("POST", `/v1/orders/${created.id}/deliver`, seller.agent, { data: { nope: 1 } });
     expect(bad.status).toBe(422);
-    const delivered = await t.ok("POST", `/v1/orders/${created.id}/deliver`, seller.agent, { output: validOutputs[DATA] });
+    const delivered = await t.ok("POST", `/v1/orders/${created.id}/deliver`, seller.agent, validDelivery);
     expect(delivered.status).toBe("DELIVERED");
     expect(delivered.deliveryAttempts).toBe(2);
 
@@ -202,7 +202,7 @@ describe("dispatch", () => {
     const seller = await t.agentSeller("data-agent", DATA);
     t.advance(61_000); // listener went quiet
     const buyer = await t.account("buyer");
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     expect(o.status).toBe("CANCELLED");
     expect(o.cancelReason).toBe("no_seller");
     expect(seller).toBeTruthy();
@@ -213,7 +213,7 @@ describe("dispatch", () => {
     const cheap = await t.agentSeller("cheap", DATA, 300);
     const pricey = await t.agentSeller("pricey", DATA, 800);
     const buyer = await t.account("buyer");
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     expect((await t.ok("GET", `/v1/orders/${o.id}`, cheap.agent)).status).toBe("OFFERED");
 
     t.advance(30_000);
@@ -229,7 +229,7 @@ describe("dispatch", () => {
     const a = await t.agentSeller("a", DATA, 300);
     const b = await t.agentSeller("b", DATA, 400);
     const buyer = await t.account("buyer");
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     await t.ok("POST", `/v1/orders/${o.id}/decline-offer`, a.agent);
     expect((await t.ok("GET", "/v1/seller/poll", b.agent)).offers).toHaveLength(1);
     await t.ok("POST", `/v1/orders/${o.id}/decline-offer`, b.agent);
@@ -244,7 +244,7 @@ describe("dispatch", () => {
     await t.ok("POST", "/v1/seller/accepting", offline.token, { on: false });
     const buyer = await t.account("buyer");
 
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: PHOTO, input: inputs[PHOTO] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[PHOTO]);
     expect(o.offerKind).toBe("human");
     for (const h of [h1, h2]) {
       expect((await t.ok("GET", "/v1/notifications", h.token))[0].kind).toBe("offer");
@@ -261,9 +261,9 @@ describe("dispatch", () => {
     const seller = await t.agentSeller("busy", DATA);
     await t.ok("PUT", `/v1/listings/${DATA}`, seller.agent, { acceptMode: "auto", dailyLimit: 1 });
     const buyer = await t.account("buyer");
-    const first = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const first = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     await t.ok("POST", `/v1/orders/${first.id}/accept-offer`, seller.agent);
-    const second = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const second = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     expect(second.status).toBe("CANCELLED");
   });
 
@@ -274,9 +274,9 @@ describe("dispatch", () => {
     await t.ok("POST", `/v1/listings/${DATA}/payment-setup`, owner.token);
     await t.ok("GET", "/v1/seller/poll", owner.token); // a plain owner poll is human presence
     const buyer = await t.account("buyer");
-    expect((await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] })).status).toBe("CANCELLED");
+    expect((await t.ok("POST", "/v1/orders", buyer.token, orders[DATA])).status).toBe("CANCELLED");
     await t.ok("GET", "/v1/seller/poll?listener=1", owner.token);
-    expect((await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] })).status).toBe("OFFERED");
+    expect((await t.ok("POST", "/v1/orders", buyer.token, orders[DATA])).status).toBe("OFFERED");
   });
 
   it("dispatches to a seller who works by hand without a listener, as long as they were active", async () => {
@@ -285,11 +285,11 @@ describe("dispatch", () => {
     const buyer = await t.account("buyer");
     t.advance(23 * 3600_000); // no listener and the 接单台 closed: still taking orders
     await t.ok("GET", "/v1/me", buyer.token);
-    expect((await t.ok("POST", "/v1/orders", buyer.token, { type: PHOTO, input: inputs[PHOTO] })).status).toBe("OFFERED");
+    expect((await t.ok("POST", "/v1/orders", buyer.token, orders[PHOTO])).status).toBe("OFFERED");
     expect((await t.ok("GET", "/v1/notifications", h.token))[0].kind).toBe("offer");
 
     t.advance(25 * 3600_000); // gone quiet for over a day: no more orders
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: PHOTO, input: inputs[PHOTO] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[PHOTO]);
     expect(o.status).toBe("CANCELLED");
   });
 
@@ -297,7 +297,7 @@ describe("dispatch", () => {
     const t = await setup();
     const h = await t.humanSeller("wang", PHOTO, 1500, { acceptMode: "auto", deliveryHours: 5 });
     const buyer = await t.account("buyer");
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: PHOTO, input: inputs[PHOTO] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[PHOTO]);
     expect(o).toMatchObject({ status: "AWAITING_PAYMENT", sellerAccountId: h.id });
 
     await t.pay(o);
@@ -308,15 +308,27 @@ describe("dispatch", () => {
     await t.hive.tick();
     expect((await t.ok("GET", `/v1/orders/${o.id}`, buyer.token)).status).toBe("PAID");
     await t.ok("POST", `/v1/orders/${o.id}/start`, h.token);
-    await t.ok("POST", `/v1/orders/${o.id}/deliver`, h.token, { output: validOutputs[PHOTO] });
+    const photo = await t.upload(h.token, o.id, "door.jpg", "image/jpeg", "jpeg");
+    await t.ok("POST", `/v1/orders/${o.id}/deliver`, h.token, { note: "门面", files: [photo.body.id] });
     expect((await t.ok("GET", `/v1/orders/${o.id}`, buyer.token)).status).toBe("DELIVERED");
   });
 
-  it("requires a delivery time for listings done by hand", async () => {
+  it("gives work done by hand the category's usual time when the seller sets none", async () => {
     const t = await setup();
     const h = await t.account("wang");
-    const r = await t.call("PUT", `/v1/listings/${PHOTO}`, h.token, { acceptMode: "ask", workMode: "manual", dailyLimit: 5 });
-    expect(r).toMatchObject({ status: 422, body: { error: "delivery_hours_required" } });
+    const listing = await t.ok("PUT", `/v1/listings/${PHOTO}`, h.token, { acceptMode: "ask", workMode: "manual", dailyLimit: 5 });
+    expect(listing.deliveryHours).toBe(4);
+    expect((await t.call("PUT", "/v1/listings/nope", h.token, { acceptMode: "ask", dailyLimit: 5 })).status).toBe(404);
+  });
+
+  it("offers the seller whose tags match the order before a cheaper one", async () => {
+    const t = await setup();
+    const cheap = await t.agentSeller("cheap", DATA, 300, ["咖啡"]);
+    const tea = await t.agentSeller("tea", DATA, 600, ["奶茶", "湖滨"]);
+    const buyer = await t.account("buyer");
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
+    expect((await t.ok("GET", "/v1/seller/poll", tea.agent)).offers.map((x: { id: string }) => x.id)).toEqual([o.id]);
+    expect((await t.ok("GET", "/v1/seller/poll", cheap.agent)).offers).toEqual([]);
   });
 
   it("wakes a waiting long-poll when an offer arrives", async () => {
@@ -326,7 +338,7 @@ describe("dispatch", () => {
     const started = Date.now();
     const poll = t.ok("GET", "/v1/seller/poll?wait=5", seller.agent);
     await new Promise((r) => setTimeout(r, 50));
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     const inbox = await poll;
     expect(inbox.offers.map((x: { id: string }) => x.id)).toEqual([o.id]);
     expect(Date.now() - started).toBeLessThan(2000);
@@ -339,7 +351,7 @@ describe("owner rules", () => {
     await t.agentSeller("s", DATA);
     const buyer = await t.account("buyer");
     await t.ok("PATCH", "/v1/me/rules", buyer.token, { paused: true });
-    const r = await t.call("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const r = await t.call("POST", "/v1/orders", buyer.token, orders[DATA]);
     expect(r.status).toBe(403);
     expect(r.body.error).toBe("account_paused");
   });
@@ -350,11 +362,11 @@ describe("owner rules", () => {
     const cheap = await t.agentSeller("cheap", DATA, 700);
     const buyer = await t.account("buyer");
     await t.ok("PATCH", "/v1/me/rules", buyer.token, { perOrderCapFen: 800 });
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     expect((await t.ok("GET", "/v1/seller/poll", cheap.agent)).offers.map((x: { id: string }) => x.id)).toEqual([o.id]);
 
     await t.ok("PATCH", "/v1/me/rules", buyer.token, { perOrderCapFen: 500 });
-    const tooCheap = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const tooCheap = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     expect(tooCheap.cancelReason).toBe("no_seller");
   });
 
@@ -363,17 +375,23 @@ describe("owner rules", () => {
     const seller = await t.agentSeller("s", DATA, 500);
     const buyer = await t.account("buyer");
     await t.ok("PATCH", "/v1/me/rules", buyer.token, { dailyCapFen: 500 });
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     await t.ok("POST", `/v1/orders/${o.id}/accept-offer`, seller.agent);
-    const r = await t.call("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const r = await t.call("POST", "/v1/orders", buyer.token, orders[DATA]);
     expect(r.body.error).toBe("daily_cap_reached");
   });
 
-  it("validates order input against the capability schema", async () => {
+  it("validates the category, the brief and the delivery format", async () => {
     const t = await setup();
     const buyer = await t.account("buyer");
-    expect((await t.call("POST", "/v1/orders", buyer.token, { type: DATA, input: { city: "" } })).status).toBe(422);
-    expect((await t.call("POST", "/v1/orders", buyer.token, { type: "nope", input: {} })).status).toBe(404);
+    const post = (body: object) => t.call("POST", "/v1/orders", buyer.token, { ...orders[DATA], ...body });
+    expect((await post({ category: "nope" })).status).toBe(404);
+    expect((await post({ brief: "  " })).status).toBe(400);
+    expect((await post({ delivery: { kind: "json", schema: { type: "nope" } } })).body.error).toBe("invalid_delivery_spec");
+    expect((await post({ delivery: { kind: "email" } })).body.error).toBe("invalid_delivery_spec");
+    // No format given: anything goes, and no structured input is needed.
+    const open = await t.ok("POST", "/v1/orders", buyer.token, { category: "content.writing", brief: "写一句奶茶店开业文案" });
+    expect(open).toMatchObject({ deliverySpec: { kind: "any" }, input: null, brief: "写一句奶茶店开业文案" });
   });
 });
 
@@ -382,7 +400,7 @@ describe("payment and failure", () => {
     const t = await setup();
     const seller = await t.agentSeller("s", DATA, 500);
     const buyer = await t.account("buyer");
-    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     const accepted = await t.ok("POST", `/v1/orders/${o.id}/accept-offer`, seller.agent);
     return { t, seller, buyer, order: accepted };
   }
@@ -429,7 +447,7 @@ describe("payment and failure", () => {
     await t.hive.tick();
     await t.pay(order);
     await t.ok("GET", "/v1/seller/poll", seller.agent);
-    const next = await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] });
+    const next = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     const accepted = await t.ok("POST", `/v1/orders/${next.id}/accept-offer`, seller.agent);
     expect(accepted.status).toBe("PAID");
   });
@@ -439,7 +457,7 @@ describe("payment and failure", () => {
     await t.pay(order);
     await t.ok("POST", `/v1/orders/${order.id}/check-payment`, buyer.token);
     await t.ok("POST", `/v1/orders/${order.id}/start`, seller.agent);
-    await t.ok("POST", `/v1/orders/${order.id}/deliver`, seller.agent, { output: validOutputs[DATA] });
+    await t.ok("POST", `/v1/orders/${order.id}/deliver`, seller.agent, validDelivery);
     t.advance(30 * 60_000);
     await t.ok("GET", "/v1/seller/poll", seller.agent);
     await t.hive.tick();
@@ -450,5 +468,60 @@ describe("payment and failure", () => {
     const { t, order } = await acceptedOrder();
     const stranger = await t.account("stranger");
     expect((await t.call("GET", `/v1/orders/${order.id}`, stranger.token)).status).toBe(404);
+  });
+});
+
+describe("delivered files", () => {
+  async function paidPhotoOrder() {
+    const t = await setup();
+    const h = await t.humanSeller("wang", PHOTO, 1500, { acceptMode: "auto" });
+    const buyer = await t.account("buyer");
+    const o = await t.ok("POST", "/v1/orders", buyer.token, { ...orders[PHOTO], delivery: { kind: "files", accept: "image/*", count: 2 } });
+    await t.pay(o);
+    await t.ok("POST", `/v1/orders/${o.id}/check-payment`, buyer.token);
+    return { t, h, buyer, o };
+  }
+
+  it("checks the count and type, then serves the files sandboxed", async () => {
+    const { t, h, buyer, o } = await paidPhotoOrder();
+    const a = (await t.upload(h.token, o.id, "门头.jpg", "image/jpeg", "jpeg-bytes")).body;
+    expect(a).toMatchObject({ name: "门头.jpg", mime: "image/jpeg", size: 10, url: `/v1/files/${a.id}` });
+    const clip = (await t.upload(h.token, o.id, "clip.mp4", "video/mp4", "mp4")).body;
+    await t.ok("POST", `/v1/orders/${o.id}/start`, h.token);
+
+    const one = await t.call("POST", `/v1/orders/${o.id}/deliver`, h.token, { files: [a.id] });
+    expect(one).toMatchObject({ status: 422, body: { error: "invalid_output" } });
+    const wrongType = await t.call("POST", `/v1/orders/${o.id}/deliver`, h.token, { files: [a.id, clip.id] });
+    expect(wrongType.body.message).toContain("clip.mp4");
+
+    const b = (await t.upload(h.token, o.id, "queue.png", "image/png", "png")).body;
+    const done = await t.ok("POST", `/v1/orders/${o.id}/deliver`, h.token, { note: "两张", files: [a.id, b.id] });
+    expect(done.status).toBe("DELIVERED");
+    const seen = await t.ok("GET", `/v1/orders/${o.id}`, buyer.token);
+    expect(seen.output).toEqual({ note: "两张", data: null, files: [a, b] });
+
+    const res = await t.app.request(`${BASE}${a.url}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("jpeg-bytes");
+    expect(res.headers.get("content-type")).toBe("image/jpeg");
+    expect(res.headers.get("content-security-policy")).toBe("sandbox");
+    expect(res.headers.get("content-disposition")).toContain(encodeURIComponent("门头.jpg"));
+    expect((await t.app.request(`${BASE}/v1/files/file_${"0".repeat(32)}`)).status).toBe(404);
+  });
+
+  it("only takes uploads from the order's seller while it's being worked on", async () => {
+    const { t, h, buyer, o } = await paidPhotoOrder();
+    expect((await t.upload(buyer.token, o.id, "x.jpg", "image/jpeg", "x")).status).toBe(404);
+    expect((await t.upload(h.token, o.id, "empty.jpg", "image/jpeg", "")).status).toBe(400);
+    const other = await t.ok("POST", "/v1/orders", buyer.token, orders[PHOTO]);
+    expect((await t.upload(h.token, other.id, "x.jpg", "image/jpeg", "x")).status).toBe(409); // not paid yet
+
+    // A file uploaded to another order can't be passed off as this one's.
+    await t.pay(other);
+    await t.ok("POST", `/v1/orders/${other.id}/check-payment`, buyer.token);
+    const elsewhere = (await t.upload(h.token, other.id, "x.jpg", "image/jpeg", "x")).body;
+    await t.ok("POST", `/v1/orders/${o.id}/start`, h.token);
+    const r = await t.call("POST", `/v1/orders/${o.id}/deliver`, h.token, { files: [elsewhere.id] });
+    expect(r).toMatchObject({ status: 422, body: { error: "unknown_file" } });
   });
 });

@@ -58,6 +58,22 @@ export const deviceLogins = pgTable("device_logins", {
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
+// The coarse catalogue dispatch matches on. Adding one is a row, not a code change.
+export const categories = pgTable("categories", {
+  id: text("id").primaryKey(),
+  title: text("title").notNull(),
+  blurb: text("blurb").notNull(),
+  // Two-character label and colour for the icon tile.
+  icon: text("icon").notNull(),
+  color: text("color").notNull(),
+  // Default work time when the seller's agent does the job, and when a person does (who may set their own).
+  workTimeoutMs: integer("work_timeout_ms").notNull(),
+  manualTimeoutMs: integer("manual_timeout_ms").notNull(),
+  // Suggested listing tags, offered when a seller lists here.
+  tags: text("tags").array().notNull().default(sql`'{}'`),
+  sort: integer("sort").notNull().default(0),
+});
+
 export const listings = pgTable(
   "listings",
   {
@@ -65,7 +81,12 @@ export const listings = pgTable(
     sellerAccountId: text("seller_account_id")
       .notNull()
       .references(() => accounts.id),
-    capabilityType: text("capability_type").notNull(),
+    category: text("category")
+      .notNull()
+      .references(() => categories.id),
+    // Free keywords matched against an order's text, and a line about the seller.
+    tags: text("tags").array().notNull().default(sql`'{}'`),
+    intro: text("intro"),
     acceptMode: text("accept_mode", { enum: ["auto", "ask"] }).notNull(),
     // Who does the work once paid (design §2); `manual` work is timed by the seller's own promise.
     workMode: text("work_mode", { enum: ["agent", "manual"] }).notNull().default("agent"),
@@ -78,7 +99,7 @@ export const listings = pgTable(
     paymentStatus: text("payment_status").notNull().default("NOT_CONFIGURED"),
     createdAt: ts("created_at").notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("listings_seller_type").on(t.sellerAccountId, t.capabilityType)],
+  (t) => [uniqueIndex("listings_seller_category").on(t.sellerAccountId, t.category)],
 );
 
 export const orders = pgTable(
@@ -86,14 +107,19 @@ export const orders = pgTable(
   {
     id: text("id").primaryKey(),
     version: integer("version").notNull().default(0),
-    capabilityType: text("capability_type").notNull(),
+    category: text("category")
+      .notNull()
+      .references(() => categories.id),
     buyerAccountId: text("buyer_account_id")
       .notNull()
       .references(() => accounts.id),
     createdByActor: text("created_by_actor", { enum: ["human", "agent"] }).notNull(),
     // tokens.id of the caller, so the owner can see what each agent ordered.
     createdByToken: text("created_by_token"),
-    input: jsonb("input").notNull(),
+    // What the buyer wants in words, optional structured input, and the delivery format they asked for.
+    brief: text("brief").notNull().default(""),
+    input: jsonb("input"),
+    deliverySpec: jsonb("delivery_spec").notNull().default({ kind: "any" }),
     maxPriceFen: integer("max_price_fen"),
     status: text("status").notNull(),
     deadline: ts("deadline"),
@@ -124,6 +150,25 @@ export const orders = pgTable(
     index("orders_buyer").on(t.buyerAccountId),
     index("orders_seller").on(t.sellerAccountId),
   ],
+);
+
+// Files a seller uploaded for an order; the bytes live in the file store under the same id.
+export const files = pgTable(
+  "files",
+  {
+    id: text("id").primaryKey(),
+    orderId: text("order_id")
+      .notNull()
+      .references(() => orders.id),
+    uploadedBy: text("uploaded_by")
+      .notNull()
+      .references(() => accounts.id),
+    name: text("name").notNull(),
+    mime: text("mime").notNull(),
+    size: integer("size").notNull(),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("files_order").on(t.orderId)],
 );
 
 // Append-only audit trail of applied transitions.

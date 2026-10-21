@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import { isCapabilityType, type Fen, type Order, type OrderEvent, type OrderStatus } from "@hive/core";
+import type { Delivery, DeliverySpec, Fen, Order, OrderEvent, OrderStatus } from "@hive/core";
 import type { Db } from "./db/client.ts";
 import { orderEvents, orders } from "./db/schema.ts";
 
@@ -7,12 +7,12 @@ export type OrderRow = typeof orders.$inferSelect;
 type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 export function rowToOrder(row: OrderRow): Order {
-  if (!isCapabilityType(row.capabilityType)) throw new Error(`unknown capability type ${row.capabilityType}`);
   return {
     id: row.id,
-    capabilityType: row.capabilityType,
+    category: row.category,
     buyerAccountId: row.buyerAccountId,
     input: row.input,
+    deliverySpec: row.deliverySpec as DeliverySpec,
     status: row.status as OrderStatus,
     deadline: row.deadline,
     offeredTo: row.offeredTo,
@@ -25,7 +25,7 @@ export function rowToOrder(row: OrderRow): Order {
     paymentRef: row.paymentRef,
     deliveryAttempts: row.deliveryAttempts,
     lastDeliveryError: row.lastDeliveryError,
-    output: row.output,
+    output: row.output as Delivery | null,
     verdict: row.verdict,
     cancelReason: row.cancelReason as Order["cancelReason"],
     failReason: row.failReason as Order["failReason"],

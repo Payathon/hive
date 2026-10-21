@@ -4,6 +4,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
 import { createApp } from "./app.ts";
 import { connectPglite, connectPostgres } from "./db/client.ts";
+import { DiskFileStore } from "./files.ts";
 import { Hive } from "./hive.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 import { NowPayProvider } from "./payments/nowpay.ts";
@@ -34,7 +35,9 @@ const db = process.env.DATABASE_URL
   ? await connectPostgres(process.env.DATABASE_URL)
   : await connectPglite(process.env.PGLITE_DIR ?? ".data/pglite");
 
-const hive = new Hive({ db, payments: paymentsFromEnv() });
+// Delivered files; FILES_DIR could later be swapped for object storage behind the same interface.
+const files = new DiskFileStore(process.env.FILES_DIR ?? ".data/files");
+const hive = new Hive({ db, payments: paymentsFromEnv(), files });
 // WEB_URL points approval links at the Vite dev server in development; otherwise the API's own origin serves the web app.
 const webUrl = process.env.WEB_URL ?? process.env.PUBLIC_URL;
 const app = createApp(hive, webUrl ? { webUrl } : {});

@@ -2,12 +2,10 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import { and, desc, eq, gt, gte, inArray, isNull, lte, ne, sql } from "drizzle-orm";
 import {
-  capabilityTypes,
-  checkInput,
-  checkOutput,
+  checkDelivery,
+  checkDeliverySpec,
   expiryEvent,
   fen,
-  isCapabilityType,
   newOrder,
   needsListener,
   nextOffer,
@@ -15,14 +13,16 @@ import {
   transition,
   workStyle,
   workTimeoutMs,
-  type CapabilityType,
+  type Delivery,
+  type DeliveredFile,
   type Fen,
   type Listing,
   type OrderEvent,
   type WorkMode,
 } from "@hive/core";
 import type { Db } from "./db/client.ts";
-import { accounts, deviceLogins, listings, notifications, orderEvents, orders, tokens } from "./db/schema.ts";
+import { accounts, categories, deviceLogins, files, listings, notifications, orderEvents, orders, tokens } from "./db/schema.ts";
+import { MemoryFileStore, type FileStore } from "./files.ts";
 import { lockOrder, orderColumns, rowToOrder, saveTransition, type OrderRow } from "./orders-repo.ts";
 import type { PaymentProvider, ProductRef } from "./payments/provider.ts";
 
@@ -53,6 +53,10 @@ export const ACTIVE_TTL_MS = 24 * 3600_000;
 // How often an authenticated request refreshes accounts.active_at.
 const ACTIVE_WRITE_EVERY_MS = 60_000;
 const DEVICE_LOGIN_TTL_MS = 10 * 60_000;
+// Categories change by editing rows; services pick edits up within this long.
+const CATEGORY_CACHE_MS = 30_000;
+// Per uploaded file. Big enough for a short video.
+export const MAX_FILE_BYTES = 100 * 1024 * 1024;
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 const newToken = () => `hive_${randomBytes(24).toString("base64url")}`;
@@ -73,19 +77,40 @@ const SPENDING: OrderRow["status"][] = ["ACCEPTED", "AWAITING_PAYMENT", "PAID", 
 export interface HiveOptions {
   db: Db;
   payments: PaymentProvider;
+  files?: FileStore;
   clock?: () => Date;
+}
+
+type CategoryRow = typeof categories.$inferSelect;
+
+// What a buyer posts: the category to dispatch in, what they want, and how it must be delivered.
+export interface OrderRequest {
+  category: string;
+  brief: string;
+  input?: unknown;
+  delivery: unknown;
+}
+
+// What a seller hands in. Files are ids returned by uploadFile for this order.
+export interface DeliveryRequest {
+  note?: string | null | undefined;
+  data?: unknown;
+  files?: string[] | undefined;
 }
 
 export class Hive {
   readonly db: Db;
   readonly payments: PaymentProvider;
+  readonly files: FileStore;
   private readonly clock: () => Date;
+  private categoryCache: { at: number; list: CategoryRow[] } | null = null;
   // Wakes long-polls for an account when something it cares about changes.
   private readonly bus = new EventEmitter().setMaxListeners(0);
 
   constructor(opts: HiveOptions) {
     this.db = opts.db;
     this.payments = opts.payments;
+    this.files = opts.files ?? new MemoryFileStore();
     this.clock = opts.clock ?? (() => new Date());
   }
 
@@ -217,34 +242,54 @@ export class Hive {
 
   // ---- listings ---------------------------------------------------------
 
+  // ---- categories -------------------------------------------------------
+
+  async listCategories(): Promise<CategoryRow[]> {
+    if (!this.categoryCache || Date.now() - this.categoryCache.at > CATEGORY_CACHE_MS) {
+      const list = await this.db.select().from(categories).orderBy(categories.sort, categories.id);
+      this.categoryCache = { at: Date.now(), list };
+    }
+    return this.categoryCache.list;
+  }
+
+  async getCategory(id: string): Promise<CategoryRow> {
+    const c = (await this.listCategories()).find((x) => x.id === id);
+    if (!c) throw new HiveError(404, "unknown_category", `unknown category ${id}; see /v1/categories`);
+    return c;
+  }
+
+  // ---- listings ---------------------------------------------------------
+
   async upsertListing(
     p: Principal,
-    type: string,
+    category: string,
     opts: {
       acceptMode: "auto" | "ask";
       workMode?: WorkMode | undefined;
       deliveryHours?: number | null | undefined;
       dailyLimit: number;
+      tags?: string[] | undefined;
+      intro?: string | null | undefined;
       active?: boolean | undefined;
     },
   ) {
-    if (!isCapabilityType(type)) throw new HiveError(404, "unknown_type", `unknown capability type ${type}`);
+    const cat = await this.getCategory(category);
     const workMode = opts.workMode ?? "agent";
-    // Manual work is timed by the seller's own promise, so it has to be given.
-    if (workMode === "manual" && !opts.deliveryHours) {
-      throw new HiveError(422, "delivery_hours_required", "say how many hours you need to deliver work done by hand");
-    }
+    // Manual work is timed by the seller's own promise, or the category's usual time if they give none.
+    const deliveryHours = workMode === "manual" ? (opts.deliveryHours ?? Math.ceil(cat.manualTimeoutMs / 3600_000)) : null;
     const values = {
       acceptMode: opts.acceptMode,
       workMode,
-      deliveryHours: workMode === "manual" ? opts.deliveryHours! : null,
+      deliveryHours,
       dailyLimit: opts.dailyLimit,
+      tags: [...new Set((opts.tags ?? []).map((t) => t.trim()).filter(Boolean))],
+      intro: opts.intro?.trim() || null,
       active: opts.active ?? true,
     };
     const [row] = await this.db
       .insert(listings)
-      .values({ id: newId("lst"), sellerAccountId: p.accountId, capabilityType: type, ...values })
-      .onConflictDoUpdate({ target: [listings.sellerAccountId, listings.capabilityType], set: values })
+      .values({ id: newId("lst"), sellerAccountId: p.accountId, category, ...values })
+      .onConflictDoUpdate({ target: [listings.sellerAccountId, listings.category], set: values })
       .returning();
     return row!;
   }
@@ -253,23 +298,23 @@ export class Hive {
     return this.db.select().from(listings).where(eq(listings.sellerAccountId, accountId));
   }
 
-  private productRef(listing: typeof listings.$inferSelect): ProductRef {
-    const type = listing.capabilityType as CapabilityType;
+  private async productRef(listing: typeof listings.$inferSelect): Promise<ProductRef> {
+    const cat = (await this.listCategories()).find((c) => c.id === listing.category);
     return {
       productId: listing.id,
       ownerId: listing.sellerAccountId,
-      productName: `hive · ${capabilityTypes[type]?.title ?? type}`,
+      productName: `hive · ${cat?.title ?? listing.category}`,
     };
   }
 
   // Walks the seller through 即刻收 configuration and syncs the price they set there.
-  async setupListingPayment(p: Principal, type: string) {
+  async setupListingPayment(p: Principal, category: string) {
     const [listing] = await this.db
       .select()
       .from(listings)
-      .where(and(eq(listings.sellerAccountId, p.accountId), eq(listings.capabilityType, type)));
-    if (!listing) throw new HiveError(404, "listing_not_found", "list this capability first");
-    const state = await this.payments.setupProduct(this.productRef(listing));
+      .where(and(eq(listings.sellerAccountId, p.accountId), eq(listings.category, category)));
+    if (!listing) throw new HiveError(404, "listing_not_found", "list in this category first");
+    const state = await this.payments.setupProduct(await this.productRef(listing));
     await this.db
       .update(listings)
       .set({ paymentStatus: state.status, priceFen: state.priceFen, skuId: state.skuId })
@@ -291,10 +336,10 @@ export class Hive {
 
   // ---- orders: buyer side -----------------------------------------------
 
-  async createOrder(p: Principal, type: string, input: unknown) {
-    if (!isCapabilityType(type)) throw new HiveError(404, "unknown_type", `unknown capability type ${type}`);
-    const checked = checkInput(type, input);
-    if (!checked.ok) throw new HiveError(422, "invalid_input", checked.error);
+  async createOrder(p: Principal, req: OrderRequest) {
+    await this.getCategory(req.category);
+    const spec = checkDeliverySpec(req.delivery);
+    if (!spec.ok) throw new HiveError(422, "invalid_delivery_spec", spec.error);
 
     const account = await this.getAccount(p.accountId);
     if (account.paused) throw new HiveError(403, "account_paused", "this account is paused by its owner");
@@ -303,14 +348,17 @@ export class Hive {
       throw new HiveError(403, "daily_cap_reached", "today's spending cap is used up");
     }
 
-    const order = newOrder({ id: newId("ord"), capabilityType: type, buyerAccountId: p.accountId, input: checked.value });
+    const input = req.input === undefined ? null : req.input;
+    const order = newOrder({ id: newId("ord"), category: req.category, buyerAccountId: p.accountId, input, deliverySpec: spec.value });
     await this.db.insert(orders).values({
       id: order.id,
-      capabilityType: type,
+      category: req.category,
       buyerAccountId: p.accountId,
       createdByActor: p.actor,
       createdByToken: p.tokenId,
-      input: order.input as object,
+      brief: req.brief,
+      input,
+      deliverySpec: spec.value,
       maxPriceFen,
       ...orderColumns(order),
       createdAt: this.now(),
@@ -372,16 +420,16 @@ export class Hive {
     const [listing] = await this.db
       .select()
       .from(listings)
-      .where(and(eq(listings.sellerAccountId, sellerAccountId), eq(listings.capabilityType, row.capabilityType)));
-    if (!listing || listing.priceFen === null) throw new HiveError(409, "listing_not_ready", "no priced listing for this type");
-    const type = row.capabilityType as CapabilityType;
+      .where(and(eq(listings.sellerAccountId, sellerAccountId), eq(listings.category, row.category)));
+    if (!listing || listing.priceFen === null) throw new HiveError(409, "listing_not_ready", "no priced listing in this category");
+    const cat = await this.getCategory(row.category);
     await this.apply(
       orderId,
       {
         type: "seller_accept",
         sellerAccountId,
         priceFen: fen(listing.priceFen),
-        workTimeoutMs: workTimeoutMs(type, listing.workMode, listing.deliveryHours),
+        workTimeoutMs: workTimeoutMs(cat.workTimeoutMs, listing.workMode, listing.deliveryHours),
       },
       { listingId: listing.id },
     );
@@ -405,28 +453,69 @@ export class Hive {
     return this.getOrder(p, orderId);
   }
 
-  async deliver(p: Principal, orderId: string, output: unknown) {
+  // Stores one file for a delivery the seller is about to make. Files only count once delivered.
+  async uploadFile(p: Principal, orderId: string, file: { name: string; mime: string; bytes: Uint8Array }) {
+    const row = await this.requireSeller(p, orderId);
+    if (!RESERVING.includes(row.status)) throw new HiveError(409, "not_in_progress", `order is ${row.status}`);
+    if (file.bytes.byteLength === 0) throw new HiveError(400, "empty_file", "the file is empty");
+    if (file.bytes.byteLength > MAX_FILE_BYTES) throw new HiveError(400, "file_too_large", `files are limited to ${MAX_FILE_BYTES / 1024 / 1024} MB`);
+    // Unguessable: the download link is the file's only key (design §7).
+    const id = `file_${randomBytes(16).toString("hex")}`;
+    const name = file.name.replace(/[\/\x00-\x1f]/g, "_").slice(0, 200) || "file";
+    await this.files.put(id, file.bytes);
+    await this.db
+      .insert(files)
+      .values({ id, orderId, uploadedBy: p.accountId, name, mime: file.mime || "application/octet-stream", size: file.bytes.byteLength, createdAt: this.now() });
+    return fileRef({ id, name, mime: file.mime || "application/octet-stream", size: file.bytes.byteLength });
+  }
+
+  async readFile(id: string) {
+    const [meta] = await this.db.select().from(files).where(eq(files.id, id));
+    const bytes = meta ? await this.files.get(id) : null;
+    if (!meta || !bytes) throw new HiveError(404, "file_not_found", "file not found");
+    return { meta, bytes };
+  }
+
+  async deliver(p: Principal, orderId: string, req: DeliveryRequest) {
     const row = await this.requireSeller(p, orderId);
     if (row.status !== "IN_PROGRESS") throw new HiveError(409, "not_in_progress", `order is ${row.status}`);
     const order = rowToOrder(row);
-    if (!checkOutput(order.capabilityType, output).ok) {
+    const output = await this.resolveDelivery(orderId, req);
+    if (!checkDelivery(order.deliverySpec, output).ok) {
       // Records the attempt and error; the seller may resubmit before the deadline.
       await this.apply(orderId, { type: "delivery_submitted", output });
       const saved = await this.loadOrder(orderId);
-      throw new HiveError(422, "invalid_output", saved.lastDeliveryError ?? "output does not match the schema");
+      throw new HiveError(422, "invalid_output", saved.lastDeliveryError ?? "the delivery doesn't have the format the buyer asked for");
     }
     // Consume the paid count before accepting the delivery; quota.verify is idempotent on the request number.
     const listing = await this.listingFor(row);
     const status = await this.payments.consume({
       requestNo: `consume_${orderId}`,
-      product: this.productRef(listing),
+      product: await this.productRef(listing),
       buyerId: row.buyerAccountId,
-      reason: `hive ${order.capabilityType} ${orderId}`,
+      reason: `hive ${order.category} ${orderId}`,
     });
     if (status === "PROCESSING") throw new HiveError(409, "consume_processing", "payment consumption pending, retry shortly");
     if (status !== "SUCCEEDED") throw new HiveError(502, "consume_failed", `could not consume the paid count: ${status}`);
     await this.apply(orderId, { type: "delivery_submitted", output });
     return this.getOrder(p, orderId);
+  }
+
+  // Turns uploaded file ids into the files recorded on the delivery; only this order's uploads count.
+  private async resolveDelivery(orderId: string, req: DeliveryRequest): Promise<Delivery> {
+    const ids = [...new Set(req.files ?? [])];
+    const rows = ids.length ? await this.db.select().from(files).where(and(eq(files.orderId, orderId), inArray(files.id, ids))) : [];
+    const missing = ids.filter((id) => !rows.some((r) => r.id === id));
+    if (missing.length) throw new HiveError(422, "unknown_file", `upload these to this order first: ${missing.join(", ")}`);
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    return {
+      note: req.note ?? null,
+      data: req.data === undefined ? null : req.data,
+      files: ids.map((id) => {
+        const r = byId.get(id)!;
+        return { id: r.id, name: r.name, mime: r.mime, size: r.size };
+      }),
+    };
   }
 
   // Long-poll for `hive serve` and the human 接单台: offers to answer and paid orders to work on.
@@ -487,9 +576,10 @@ export class Hive {
     return { ...order, sellerName: seller?.name ?? null, events };
   }
 
-  // Public catalog: every capability type with its sellable listings, cheapest and most reliable first.
+  // Public catalog: every category with its sellable listings, cheapest and most reliable first.
   // Each seller says how they work, so a buyer (or their agent) can tell instant from by-hand.
   async market() {
+    const cats = await this.listCategories();
     const today = startOfShanghaiDay(this.now());
     const rows = await this.db
       .select({ listing: listings, account: accounts })
@@ -499,26 +589,35 @@ export class Hive {
     const sellers = new Map<string, Array<Record<string, unknown> & { priceFen: number; passRate: number | null }>>();
     for (const { listing, account } of rows) {
       if (listing.priceFen === null) continue;
-      const stats = await this.sellerStats(listing.sellerAccountId, listing.capabilityType, today);
-      const list = sellers.get(listing.capabilityType) ?? [];
+      const cat = cats.find((c) => c.id === listing.category);
+      if (!cat) continue;
+      const stats = await this.sellerStats(listing.sellerAccountId, listing.category, today);
+      const list = sellers.get(listing.category) ?? [];
       list.push({
         name: account.name,
+        tags: listing.tags,
+        intro: listing.intro,
         acceptMode: listing.acceptMode,
         workMode: listing.workMode,
         workStyle: workStyle(listing),
-        workTimeoutMs: workTimeoutMs(listing.capabilityType as CapabilityType, listing.workMode, listing.deliveryHours),
+        workTimeoutMs: workTimeoutMs(cat.workTimeoutMs, listing.workMode, listing.deliveryHours),
         priceFen: listing.priceFen,
         online: this.isOnline(listing, account),
         passRate: stats.passRate,
         completed: stats.completed,
       });
-      sellers.set(listing.capabilityType, list);
+      sellers.set(listing.category, list);
     }
-    return Object.entries(capabilityTypes).map(([type, t]) => ({
-      type,
-      title: t.title,
-      workTimeoutMs: t.workTimeoutMs,
-      sellers: (sellers.get(type) ?? []).sort((a, b) => a.priceFen - b.priceFen || (b.passRate ?? 1) - (a.passRate ?? 1)),
+    return cats.map((c) => ({
+      id: c.id,
+      title: c.title,
+      blurb: c.blurb,
+      icon: c.icon,
+      color: c.color,
+      workTimeoutMs: c.workTimeoutMs,
+      manualTimeoutMs: c.manualTimeoutMs,
+      tags: c.tags,
+      sellers: (sellers.get(c.id) ?? []).sort((a, b) => a.priceFen - b.priceFen || (b.passRate ?? 1) - (a.passRate ?? 1)),
     }));
   }
 
@@ -535,7 +634,7 @@ export class Hive {
     const earned = await this.db.select().from(orders).where(and(eq(orders.sellerAccountId, p.accountId), paid)).orderBy(desc(orders.paidAt));
     const entry = (r: OrderRow) => ({
       orderId: r.id,
-      capabilityType: r.capabilityType,
+      category: r.category,
       priceFen: r.priceFen,
       paidAt: r.paidAt,
       createdByActor: r.createdByActor,
@@ -650,9 +749,10 @@ export class Hive {
   private async dispatch(id: string) {
     const row = await this.loadOrder(id);
     if (row.status !== "DISPATCHING") return;
-    const candidates = await this.candidateListings(row.capabilityType as CapabilityType);
+    const candidates = await this.candidateListings(row.category);
     const offer = nextOffer(candidates, {
-      capabilityType: row.capabilityType as CapabilityType,
+      category: row.category,
+      text: `${row.brief}\n${row.input === null ? "" : JSON.stringify(row.input)}`,
       buyerAccountId: row.buyerAccountId,
       maxPriceFen: row.maxPriceFen === null ? null : fen(row.maxPriceFen),
       passedBy: row.passedBy,
@@ -665,22 +765,23 @@ export class Hive {
     if (offer.platformAccepts) await this.acceptFor(offer.sellerAccountIds[0]!, id);
   }
 
-  private async candidateListings(type: CapabilityType): Promise<Listing[]> {
+  private async candidateListings(category: string): Promise<Listing[]> {
     const now = this.now();
     const rows = await this.db
       .select({ listing: listings, account: accounts })
       .from(listings)
       .innerJoin(accounts, eq(accounts.id, listings.sellerAccountId))
-      .where(and(eq(listings.capabilityType, type), eq(listings.active, true), eq(listings.paymentStatus, "ENABLED")));
+      .where(and(eq(listings.category, category), eq(listings.active, true), eq(listings.paymentStatus, "ENABLED")));
     const today = startOfShanghaiDay(now);
     const out: Listing[] = [];
     for (const { listing, account } of rows) {
       if (listing.priceFen === null) continue;
       const online = this.isOnline(listing, account);
-      const stats = await this.sellerStats(listing.sellerAccountId, type, today);
+      const stats = await this.sellerStats(listing.sellerAccountId, category, today);
       out.push({
         sellerAccountId: listing.sellerAccountId,
-        capabilityType: type,
+        category,
+        tags: listing.tags,
         priceFen: fen(listing.priceFen),
         acceptMode: listing.acceptMode,
         workMode: listing.workMode,
@@ -701,14 +802,14 @@ export class Hive {
     return account.humanAccepting && (account.activeAt ?? new Date(0)) > ago(ACTIVE_TTL_MS);
   }
 
-  private async sellerStats(sellerAccountId: string, type: string, today: Date) {
+  private async sellerStats(sellerAccountId: string, category: string, today: Date) {
     const [today_] = (await this.db
       .select({ n: sql<number>`count(*)::int` })
       .from(orders)
       .where(
         and(
           eq(orders.sellerAccountId, sellerAccountId),
-          eq(orders.capabilityType, type),
+          eq(orders.category, category),
           ne(orders.status, "CANCELLED"),
           gte(orders.createdAt, today),
         ),
@@ -733,7 +834,7 @@ export class Hive {
     const requestNo = `purchase_${id}`;
     const purchase = await this.payments.createPurchase({
       requestNo,
-      product: this.productRef(listing),
+      product: await this.productRef(listing),
       skuId: listing.skuId,
       buyerId: row.buyerAccountId,
     });
@@ -751,7 +852,7 @@ export class Hive {
     const row = await this.loadOrder(id);
     if (row.status !== "AWAITING_PAYMENT") return;
     const listing = await this.listingFor(row);
-    const remaining = await this.payments.remainingQuota({ product: this.productRef(listing), buyerId: row.buyerAccountId });
+    const remaining = await this.payments.remainingQuota({ product: await this.productRef(listing), buyerId: row.buyerAccountId });
     const [{ reserved }] = (await this.db
       .select({ reserved: sql<number>`count(*)::int` })
       .from(orders)
@@ -772,7 +873,7 @@ export class Hive {
   }
 
   private async announce(row: OrderRow, event: OrderEvent) {
-    const title = capabilityTypes[row.capabilityType as CapabilityType]?.title ?? row.capabilityType;
+    const title = (await this.listCategories()).find((c) => c.id === row.category)?.title ?? row.category;
     const price = row.priceFen === null ? "" : `${(row.priceFen / 100).toFixed(2)} 元`;
     const buyer = row.buyerAccountId;
     const seller = row.sellerAccountId;
@@ -811,16 +912,22 @@ export class Hive {
 }
 
 // Order as exposed over the API.
+// Delivered files carry a download link relative to the API's origin.
+export const fileRef = (f: DeliveredFile) => ({ ...f, url: `/v1/files/${f.id}` });
+
 export function publicOrder(r: OrderRow) {
+  const output = r.output as Delivery | null;
   return {
     id: r.id,
-    capabilityType: r.capabilityType,
+    category: r.category,
     status: r.status,
     buyerAccountId: r.buyerAccountId,
     sellerAccountId: r.sellerAccountId,
     createdByActor: r.createdByActor,
+    brief: r.brief,
     input: r.input,
-    output: r.output,
+    deliverySpec: r.deliverySpec,
+    output: output && { ...output, files: (output.files ?? []).map(fileRef) },
     priceFen: r.priceFen,
     deadline: r.deadline,
     offerKind: r.offerKind,
