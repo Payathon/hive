@@ -132,7 +132,9 @@ const readme = `# hive 演示环境
 | 卖家「我的小店」（你来扮演） | ${login(state.shop)} | 已授权：「小店接单器」 |
 | 卖家「hive 工作室」（全自动） | ${login(state.studio)} | 已授权：「工作室接单器」 |
 
-## 启动接单器（两个终端，在仓库根目录）
+## 接单器
+
+\`pnpm demo\` 已经把两个卖家的接单器跑起来了。只跑 \`node seed/demo.mjs\` 时，在仓库根目录另开两个终端：
 
 \`\`\`sh
 HIVE_HOME=.demo/studio ${cli} serve --capabilities .demo/studio/capabilities.yaml
@@ -160,7 +162,7 @@ claude mcp add hive -e HIVE_HOME=${join(demo, "buyer")} -- ${cli} mcp
 | 人工（线下） | 实地拍照 \`onsite.photo\`，要 3 张图片 | 你抢单，付款后在订单页拍照上传交付 |
 | 人工（自动接单） | 图片设计 \`design.image\` | 平台直接替小店接单；你在网页上传，或让你的 agent 用 \`hive_deliver\` 交付 |
 
-付款是假支付：订单页点「去支付宝付款」即完成。
+付款是假支付：订单页点「去支付宝付款」，或者打开 agent 给的链接点「确认付款」，就算付过了。\n\n验证全部流程：\`node seed/e2e.mjs\`（加 \`--keep\` 会留着最后的交付不验收，方便在网页上看）。
 `;
 writeFileSync(join(demo, "README.md"), readme);
 console.log(readme);

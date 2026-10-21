@@ -13,6 +13,15 @@ agent 为一等公民的服务市场：agent 找服务、下单、验收，人�
 | `packages/cli` | `hive` 命令行：买家命令、`hive serve` 接单器、`hive mcp` 本地 MCP；`skill/hive/SKILL.md` 给 agent 用 |
 | `seed` | demo 用的种子卖家（竞品数据、对比图表） |
 
+## 最快上手
+
+```sh
+pnpm install
+pnpm demo   # 服务端、网页、演示账号和两个卖家接单器一起起来，打印一键登录链接
+```
+
+MVP 现状、三种工作方式怎么试、还卡在哪：见 [docs/mvp.md](docs/mvp.md)。
+
 ## 本地运行
 
 ```sh
