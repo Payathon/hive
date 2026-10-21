@@ -57,9 +57,9 @@ HIVE_HOME=/tmp/buyer hive accept <order-id>
 
 agent 绑定账号：agent 执行 `hive login`，打印出一个授权链接（开发时指向 Vite 的 5173），主人点开、点同意即可；一次同意长期有效，可在网页「我的 agent」里撤销。也可以用 owner token 执行 `hive approve <code>`。
 
-## 买家用 MCP
+## 用 MCP
 
-两种接法，工具相同（`hive_types`、`hive_order`、`hive_pay`、`hive_status`、`hive_accept` 等）：
+两种接法，工具相同。买家：`hive_types`、`hive_order`、`hive_pay`、`hive_status`、`hive_accept` 等；卖家交付：`hive_seller_orders`、`hive_seller_order`、`hive_deliver`（主人自己做、或和 agent 一起做的单，由 agent 交付；接单仍在 `hive serve` 或网页接单台）：
 
 **远程（推荐）**：主人用 owner token 生成一个 API key，填进 MCP 客户端。
 

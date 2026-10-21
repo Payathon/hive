@@ -20,9 +20,22 @@ hive 是一个 **agent 为一等公民** 的服务市场，形态类似闲鱼：
 |---|---|
 | 账号 | 一个人。拥有规则设置、账单、上架的能力。可授权多个 agent 代为操作 |
 | 能力类型 | **平台定义**的标准能力，带固定的输入/输出 schema，例如 `market-data.competitors`、`chart.compare`、`photo.onsite`。派单、格式校验都依赖它 |
-| 能力上架 | 某卖家实现某能力类型：每日上限、接单方式（`auto` / `ask`）、执行方式；价格由卖家在支付宝即刻收托管页设置，hive 同步 |
+| 能力上架 | 某卖家实现某能力类型：每日上限、两个互相独立、随时可改的开关（见下）；价格由卖家在支付宝即刻收托管页设置，hive 同步 |
 | 任务 / 订单 | 买家针对某能力类型发出的一次需求，输入须符合该类型的输入 schema |
 | 接单器 | 卖家本地常驻进程 `hive serve`，长轮询听单，派到单再唤起 agent |
+
+**卖家的两个开关**。三类卖家（调好的 agent 全自动、要人介入定制的 HITL、线下要人做的）只是卖家内部的差别，买家只看交付物。平台只有一个交付口子，区别只在谁来调它：
+
+| 开关 | 选项 |
+|---|---|
+| 接单 | `auto` 自动接 / `ask` 要我审批（在接单台抢单） |
+| 干活 | 交给 agent：配了 `run`，付款后接单器唤起 agent，干完自动交付 / 我自己来：不配 `run`，人做完从网页交付，或让自己的 agent 用 MCP 的 `hive_deliver` 交付 |
+
+| 组合 | 场景 |
+|---|---|
+| `auto` + agent | 全自动 |
+| `ask` + agent | 我把关接不接，接下后 agent 自己做 |
+| `ask` + 自己来 | HITL 定制，或线下任务（拍照等） |
 
 ## 3. 订单流程
 
@@ -110,7 +123,7 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 买卖双方共用一个 CLI，通过 `npx` 分发，配一份 SKILL.md 教 agent 何时用哪条命令（与支付宝 `alipay-bot` + skill 同一套路）。
 
-买家也可以走 MCP，工具相同（`hive_order`、`hive_pay`、`hive_status` 等），不提供 approve 工具，agent 不能批准自己的登录。接单只走 `hive serve`，因为接单器得常驻本地进程。
+买家也可以走 MCP，工具相同（`hive_order`、`hive_pay`、`hive_status` 等），不提供 approve 工具，agent 不能批准自己的登录。卖家这边，**听单和接单走 `hive serve` 或网页接单台**，因为得常驻在线；**交付可以走 MCP**：`hive_seller_orders`（已付款、待交付的单）、`hive_seller_order`（买家输入和输出 schema）、`hive_start`、`hive_deliver`（schema 不过就返回错误，让 agent 改了再交）。这是给"我自己来"的能力用的：主人和自己的 agent 一起做完，由 agent 交付。MCP 不提供抢单/审批工具。
 
 ### agent 授权
 
@@ -143,7 +156,7 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 - **主动长轮询** hive（普通 HTTP，约 25 秒一轮），不需要公网 IP，不用 WebSocket。
 - 读取 `~/.hive/capabilities.yaml` 声明能力；`auto` 能力按规则自动接单，不调用 LLM。
-- 收到"已付款"后以无头模式唤起本地 agent（如 `claude -p`），提交交付物。
+- 收到"已付款"后以无头模式唤起本地 agent（如 `claude -p`），提交交付物。没配 `run` 的能力不唤起，只提示一次去网页或用 `hive_deliver` 交付。
 - 种子 agent 跑的是同一个接单器，只是部署在我们的服务器上。
 
 ```yaml
@@ -152,6 +165,9 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
   daily_limit: 50
   accept: auto          # auto | ask
   run: claude -p --output-format json "{{task}}"
+- type: photo.onsite
+  accept: ask           # 我来审批
+  # 不配 run：我自己来，网页或 hive_deliver 交付
 ```
 
 ## 6. 通知
@@ -206,7 +222,7 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 
 | 事项 | 说明 |
 |---|---|
-| 卖家侧 agent 形态 | 卖家的 agent 是什么、在哪个工作目录跑、全自动还是要人介入（HITL），以及线下要人做的任务（如拍照）怎么接，都还没想清楚，所以卖家侧的注册/授权流程暂不改动，现状仍是 `hive serve` + owner token。以后可考虑派单后先让卖家 agent 判断能否自动完成、拿不准再转人工（参考 ACP 的协商阶段、A2A 的 `input-required`），本期不做 |
+| 卖家侧 agent 形态 | 卖家的 agent 是什么、在哪个工作目录跑、全自动还是要人介入（HITL），以及线下要人做的任务（如拍照）怎么接，都还没想清楚，所以卖家侧的注册/授权流程暂不改动，现状仍是 `hive serve` + owner token。干活方式已定为上面的两个开关。以后可考虑派单后先让卖家 agent 判断能否自动完成、拿不准再转人工（参考 ACP 的协商阶段、A2A 的 `input-required`），本期不做 |
 | 即刻收合作平台资格 | 即刻收目前只开放给合作平台，hive 需申请；需找主办方确认 |
 | 退款 | 已预留独立的 `refunds` 实体和支付适配层 `refund()`；待研究即刻收下的退款方式及触发规则 |
 | 授权额度内免确认 | Agent Pay 的"用户授权范围内"是否支持免确认；若支持可做小额加分项 |
