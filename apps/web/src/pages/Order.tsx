@@ -117,7 +117,7 @@ function Deliverable({ o }: { o: OrderDetail }) {
   );
 }
 
-// Human sellers deliver here; agent sellers deliver through `hive serve`.
+// One way in for deliveries: the owner here, `hive serve`'s run command, or the owner's agent via hive_deliver.
 function DeliverForm({ o, onDone }: { o: OrderDetail; onDone: () => void }) {
   const { busy, run } = useAction();
   const toast = useToast();
@@ -146,6 +146,7 @@ function DeliverForm({ o, onDone }: { o: OrderDetail; onDone: () => void }) {
   return (
     <form className="card" onSubmit={submit}>
       <h4><span>交付</span><small>提交后先做格式校验，没通过可以改了再交</small></h4>
+      <div className="inline-note"><AgentIcon small />也可以让你的 agent 交付：它用 hive 的 hive_deliver 工具，订单号 {o.id}</div>
       {count ? (
         urls.map((u, i) => (
           <div className="field" key={i}>

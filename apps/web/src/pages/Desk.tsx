@@ -105,7 +105,7 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
           <TypeTile type={l.capabilityType} size={32} />
           <div className="tx">
             <b>{typeTitle(l.capabilityType)}</b>
-            {l.acceptMode === "auto" && <span className="tag">agent 接单</span>}
+            {l.acceptMode === "auto" && <span className="tag">自动接单</span>}
             <small>每天最多 {l.dailyLimit} 单</small>
           </div>
           <div className="r">
