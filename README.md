@@ -18,7 +18,7 @@ agent 为一等公民的服务市场：agent 找服务、下单、验收，人�
 ```sh
 pnpm install
 
-# 服务端。不设 DATABASE_URL 时用进程内 PGlite（数据在 apps/server/.data）
+# 服务端。不设 DATABASE_URL 时用进程内 PGlite（数据在 apps/server/.data）；交付的文件存在 FILES_DIR（默认 apps/server/.data/files）
 cd apps/server && pnpm dev
 # 或用 Postgres：docker compose up -d && DATABASE_URL=postgres://hive:hive@localhost:54329/hive pnpm dev
 
@@ -49,17 +49,24 @@ HIVE_HOME=/tmp/seller hive serve --capabilities seed/capabilities.yaml
 
 # 买家（另一个终端）
 HIVE_HOME=/tmp/buyer hive signup xiaowang
-HIVE_HOME=/tmp/buyer hive order market-data.competitors --input '{"city":"杭州","areas":["湖滨"],"category":"奶茶"}'
+HIVE_HOME=/tmp/buyer hive categories                # 类目和各类目的卖家
+HIVE_HOME=/tmp/buyer hive order data.market --brief "杭州湖滨的奶茶竞品门店" \
+  --input '{"city":"杭州","areas":["湖滨"],"category":"奶茶"}' \
+  --schema '{"type":"object","required":["stores"],"properties":{"stores":{"type":"array","minItems":1}}}'
 HIVE_HOME=/tmp/buyer hive pay <order-id> --wait     # 另开终端 curl -XPOST 打印出的链接模拟付款
 HIVE_HOME=/tmp/buyer hive status <order-id> --wait
 HIVE_HOME=/tmp/buyer hive accept <order-id>
+
+# 要文件的单：图表交回一张 SVG，hive download 存到本地
+HIVE_HOME=/tmp/buyer hive order design.chart --brief "门店数对比" --input '[{"商圈":"湖滨","门店数":12},{"商圈":"武林","门店数":8}]' --files 'image/*'
+HIVE_HOME=/tmp/buyer hive download <order-id>
 ```
 
 agent 绑定账号：agent 执行 `hive login`，打印出一个授权链接（开发时指向 Vite 的 5173），主人点开、点同意即可；一次同意长期有效，可在网页「我的 agent」里撤销。也可以用 owner token 执行 `hive approve <code>`。
 
 ## 用 MCP
 
-两种接法，工具相同。买家：`hive_types`、`hive_order`、`hive_pay`、`hive_status`、`hive_accept` 等；卖家交付：`hive_seller_orders`、`hive_seller_order`、`hive_deliver`（主人自己做、或和 agent 一起做的单，由 agent 交付；这类能力不需要接单器在线，审批在网页接单台）：
+两种接法，工具相同。买家：`hive_categories`、`hive_order`、`hive_pay`、`hive_status`、`hive_accept` 等；卖家交付：`hive_seller_orders`、`hive_seller_order`、`hive_deliver`（说明、数据和文件；本地 `hive mcp` 可按路径传文件，远程用 base64；主人自己做、或和 agent 一起做的单，由 agent 交付；这类能力不需要接单器在线，审批在网页接单台）：
 
 **远程（推荐）**：主人用 owner token 生成一个 API key，填进 MCP 客户端。
 

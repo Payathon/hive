@@ -19,10 +19,25 @@ hive 是一个 **agent 为一等公民** 的服务市场，形态类似闲鱼：
 | 概念 | 说明 |
 |---|---|
 | 账号 | 一个人。拥有规则设置、账单、上架的能力。可授权多个 agent 代为操作 |
-| 能力类型 | **平台定义**的标准能力，带固定的输入/输出 schema，例如 `market-data.competitors`、`chart.compare`、`photo.onsite`。派单、格式校验都依赖它 |
-| 能力上架 | 某卖家实现某能力类型：每日上限、两个互相独立、随时可改的开关（见下）；价格由卖家在支付宝即刻收托管页设置，hive 同步 |
-| 任务 / 订单 | 买家针对某能力类型发出的一次需求，输入须符合该类型的输入 schema |
+| 类目 | 平台维护的一张粗类目表（`categories`），**只用来派单匹配**，不规定输入输出。每项有 id、名字、一句说明、图标，两个默认干活时限（交给 agent / 人来做）和推荐标签。加类目就是加一行数据，不改代码。起始 20 项见下 |
+| 上架 | 某卖家在某类目接活：选一个类目，可写几个自由标签和一句介绍；每日上限、两个互相独立、随时可改的开关（见下）；价格由卖家在支付宝即刻收托管页设置，hive 同步 |
+| 任务 / 订单 | 买家在某类目下发出的一次需求：**需求描述**（文字，必填）、可选的结构化 `input`、**交付格式** |
+| 交付格式 | 买家下单时自己定，三选一：① **JSON**，附一份 JSON Schema，平台按它校验交付的数据，不过就退回卖家重交；② **文件**，可要求类型（如 `image/*`、`video/mp4`）和至少几个，平台只查类型和数量；③ **不限**，非空就行。②③ 的质量由买家验收判断 |
+| 交付物 | 一段给买家的说明（可选）+ 结构化数据（可选）+ 文件列表。文件由卖家先上传到订单，交付时引用 |
 | 接单器 | 卖家本地常驻进程 `hive serve`，长轮询听单，派到单再唤起 agent |
+
+**起始类目**（id 用"组.名"写法，以迁移 `0003_categories.sql` 里的数据为准；括号里是交给 agent / 人来做的默认时限）：
+
+| 组 | 类目 |
+|---|---|
+| 信息与数据 | `data.market` 竞品/市场数据（10 分钟 / 24 小时）、`data.research` 网页调研与资料整理、`data.cleaning` 数据清洗与表格处理 |
+| 内容 | `content.writing` 文案写作、`content.translation` 翻译、`content.summary` 摘要/会议纪要 |
+| 设计与多媒体 | `design.chart` 图表与可视化、`design.image` 图片设计/海报、`media.video` 视频剪辑（1 小时 / 72 小时）、`media.audio` 音频处理/配音 |
+| 开发 | `dev.code` 写代码/脚本、`dev.review` 代码审查、`dev.debug` bug 排查、`dev.ops` 部署运维 |
+| 线下与人工 | `onsite.photo` 实地拍照/探店（2 小时 / 4 小时）、`onsite.errand` 线下跑腿/代办、`human.verify` 人工核验/打电话、`human.survey` 问卷与用户访谈 |
+| 其他 | `other.consult` 咨询/专家意见、`other.misc` 其他 |
+
+原来的三个能力类型并入：`market-data.competitors` → `data.market`，`chart.compare` → `design.chart`，`photo.onsite` → `onsite.photo`。
 
 **卖家的两个开关**。三类卖家（调好的 agent 全自动、要人介入定制的 HITL、线下要人做的）只是卖家内部的差别，买家只看交付物。平台只有一个交付口子，区别只在谁来调它：
 
@@ -38,7 +53,7 @@ hive 是一个 **agent 为一等公民** 的服务市场，形态类似闲鱼：
 | `auto` + 自己来 | 平台替我接下，我在约定时间内做完（可以远程操控自己的 agent） | 人工交付 · X 小时内 |
 | `ask` + 自己来 | HITL 定制，或线下任务（拍照等） | 需卖家审批 · 人工交付 · X 小时内 |
 
-"我自己来"不要求人坐在电脑前，所以**只有全自动这一种组合靠接单器心跳**，其余要人参与的组合不依赖心跳。"我自己来"上架时卖家必须填**多久内交付**（`delivery_hours`），平台按它算干活时限，买家在市场、`hive types` 和 MCP 的 `hive_types` 里都能看到每个卖家的工作方式和时限，自己选。
+"我自己来"不要求人坐在电脑前，所以**只有全自动这一种组合靠接单器心跳**，其余要人参与的组合不依赖心跳。"我自己来"上架时卖家填**多久内交付**（`delivery_hours`），不填就用类目的人工默认时限，平台按它算干活时限，买家在市场、`hive categories` 和 MCP 的 `hive_categories` 里都能看到每个卖家的工作方式和时限，自己选。
 
 ## 3. 订单流程
 
@@ -46,15 +61,15 @@ hive 是一个 **agent 为一等公民** 的服务市场，形态类似闲鱼：
 
 ```
 买方 agent                hive                     卖方(接单器 / 人)         支付宝
-    │ hive order ───────▶ 校验输入 schema
+    │ hive order ───────▶ 校验类目、交付格式
     │                     派单 ──────────────────▶ 接单(auto 规则 / ask 人工)
     │                     ◀──────────────────────── 接单
     │ ◀── 待付款(链接/码)  生成购买入口(即刻收) ─────────────────────────────▶
     │  人在支付宝确认 ─────────────────────────────────────────────────────▶ 钱进卖家账户
     │                     ◀──────────────────────────────────── 支付结果
     │                     推送"已付款" ───────────▶ 唤起 agent 干活
-    │                     ◀──────────────────────── 提交交付物
-    │                     输出 schema 校验; quota.verify 核销
+    │                     ◀──────────────────────── 上传文件、提交交付物
+    │                     按交付格式检查; quota.verify 核销
     │ ◀── 交付物          
     │ hive accept/reject ▶ 记入卖家通过率
 ```
@@ -70,7 +85,7 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 | # | 从 → 到 | 触发方 | 说明 |
 |---|---|---|---|
-| 1 | — → `CREATED` | 买方（agent 或人） | 输入通过能力类型 schema；未超主人设的单笔/每日上限；账号未暂停 |
+| 1 | — → `CREATED` | 买方（agent 或人） | 类目存在、需求描述非空、交付格式合法（JSON Schema 能编译）；未超主人设的单笔/每日上限；账号未暂停 |
 | 2 | `CREATED` → `DISPATCHING` | 系统 | 立即 |
 | 3 | `DISPATCHING` → `OFFERED` | 系统 | 选出候选并发出邀约 |
 | 4 | `DISPATCHING` → `CANCELLED` | 系统 | 无候选，或候选全部拒绝/超时 |
@@ -80,7 +95,7 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 | 8 | `AWAITING_PAYMENT` → `PAID` | 系统轮询 `quota.query` | 即刻收没有支付成功通知：买家在该商品下的剩余次数 − 已付未核销订单数 ≥ 1 即视为已付。买家可调 `check-payment` 立即查，后台每轮也会查。之前剩余的次数会直接抵扣 |
 | 9 | `AWAITING_PAYMENT` → `CANCELLED` | 超时 / 买方取消 | 未付钱，无资金问题 |
 | 10 | `PAID` → `IN_PROGRESS` | 卖方 | 接单器收到"已付款"开始干活；人工卖家点"开始" |
-| 11 | `IN_PROGRESS` → `DELIVERED` | 卖方提交 + 系统校验 | 输出过 schema 后 `quota.verify` 核销。**格式不过可在干活时限内重交** |
+| 11 | `IN_PROGRESS` → `DELIVERED` | 卖方提交 + 系统检查 | 交付物符合买家定的交付格式后 `quota.verify` 核销。**格式不过可在干活时限内重交** |
 | 12 | `IN_PROGRESS` → `FAILED` | 超时 / 卖方放弃 / 接单器心跳中断 2 分钟（仅全自动） | 付款后不能改派（钱已在卖家账户） |
 | 13 | `DELIVERED` → `COMPLETED` | 买方接受 / 拒绝 / 超时 | 验收结果是 `COMPLETED` 上的字段（accepted / rejected / auto_accepted），只计入信誉 |
 
@@ -94,7 +109,7 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 | 付款窗口 `AWAITING_PAYMENT` | 15 分钟 | 15 分钟 |
 | 验收窗口 `DELIVERED` | 30 分钟 | 30 分钟 |
 
-干活时限（从付款算起）跟着干活方式走：交给 agent 的按能力类型（数据/图表 10 分钟、拍照 2 小时）；我自己来的按卖家上架时填的 `delivery_hours`。接单时把时限记到订单上，之后改上架不影响已接的单。
+干活时限（从付款算起）跟着干活方式走：交给 agent 的按类目的 agent 默认时限（如数据、图表 10 分钟，剪辑 1 小时）；我自己来的按卖家上架时填的 `delivery_hours`，没填就是类目的人工默认时限（如拍照 4 小时）。接单时把时限记到订单上，之后改上架不影响已接的单。
 
 #### 为退款预留的空间
 
@@ -106,7 +121,7 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 ### 派单
 
-- 候选：实现该能力类型 + 在线 + 未超每日上限，按 **价格最低、通过率高** 排序。
+- 候选：在该类目上架 + 在线 + 未超每日上限。排序先看**标签匹配度**：卖家标签在订单的需求描述和 `input` 里出现了几个（简单的关键词包含，不分大小写），多的排前；同分再按 **价格最低、通过率高**。以后可换成语义匹配。
 - **`auto` 卖家**：逐个派，几秒内无响应即换下一个。`auto` + 自己来没有接单器，由平台直接替卖家接下。
 - **`ask` 卖家**：同时派给前 N 个，先接先得（抢单），接单窗口 30 分钟。要人参与的卖家不必守在屏幕前，窗口给足；全自动保持 30 秒。窗口内没人接就换下一批，换完仍没人接则取消。买家能看到这一批的截止时间（订单 `deadline`），买家 agent 不必轮询干等。
 - **只派给在线（可接单）的卖家**：
@@ -119,7 +134,7 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 - **渠道**：支付宝 Vibe Pay **即刻收（平台模式）**。卖家在支付宝托管页绑定自己的支付宝（个人/企业均可），钱直接进卖家账户。不做分账，hive 不碰钱（规避"二清"）。
 - **赛道**：参加支付宝 PAYATHON 2026 的 Vibe Pay 主赛道（同一作品不能跨赛道投稿，评审看真实收款），不接 Agent Pay：买家 agent 大多跑在电脑上，收银台链接/二维码最现实；Agent Pay 要求手机端 App 内的 agent、需 BD/KYA 签约且无沙箱。
-- **一单 = 一次购买**：每个"卖家 × 能力类型"在即刻收里配置一个商品（`out_product_id` = listing id，`external_owner_id` = 卖家账号，`external_buyer_id` = 买家账号），单一档位"1 次"。**价格由卖家在支付宝托管页设置**，hive 通过 `charge.query` 同步。卖家接单后发起购买；交付时调用 `alipay.aipay.nowpay.quota.verify` 核销，作为"已交付"凭证。
+- **一单 = 一次购买**：每个"卖家 × 类目"在即刻收里配置一个商品（`out_product_id` = listing id，`external_owner_id` = 卖家账号，`external_buyer_id` = 买家账号），单一档位"1 次"。**价格由卖家在支付宝托管页设置**，hive 通过 `charge.query` 同步。卖家接单后发起购买；交付时调用 `alipay.aipay.nowpay.quota.verify` 核销，作为"已交付"凭证。
 - **付款检测靠轮询**：即刻收没有支付成功的异步通知，hive 用 `quota.query` 判断（见状态机 #8）。
 - **agent 发起、人确认**：买方 agent 拿到购买入口，交给人在支付宝里确认。每一笔都需要人确认。
 - **人在网页上买**：同样走即刻收购买页。
@@ -130,7 +145,9 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 买卖双方共用一个 CLI，通过 `npx` 分发，配一份 SKILL.md 教 agent 何时用哪条命令（与支付宝 `alipay-bot` + skill 同一套路）。
 
-买家也可以走 MCP，工具相同（`hive_order`、`hive_pay`、`hive_status` 等），不提供 approve 工具，agent 不能批准自己的登录。卖家这边，**听单和接单走 `hive serve` 或网页接单台**，因为得常驻在线；**交付可以走 MCP**：`hive_seller_orders`（已付款、待交付的单）、`hive_seller_order`（买家输入和输出 schema）、`hive_start`、`hive_deliver`（schema 不过就返回错误，让 agent 改了再交）。这是给"我自己来"的能力用的：主人和自己的 agent 一起做完，由 agent 交付。MCP 不提供抢单/审批工具。
+买家也可以走 MCP，工具相同（`hive_categories`、`hive_order`、`hive_pay`、`hive_status` 等），不提供 approve 工具，agent 不能批准自己的登录。`hive_order` 带类目、需求描述、可选 `input` 和交付格式。卖家这边，**听单和接单走 `hive serve` 或网页接单台**，因为得常驻在线；**交付可以走 MCP**：`hive_seller_orders`（已付款、待交付的单）、`hive_seller_order`（买家的需求和交付格式）、`hive_start`、`hive_deliver`（说明、数据、文件任意组合；本地 `hive mcp` 可以按路径传文件，远程用 base64；格式不过就返回错误，让 agent 改了再交）。这是给"我自己来"的能力用的：主人和自己的 agent 一起做完，由 agent 交付。MCP 不提供抢单/审批工具。
+
+**交付物下载**：交付里的每个文件有一个 `/v1/files/<id>` 链接，id 是 128 位随机数，链接本身就是钥匙（网页 `<img>` 和不带 token 的 agent 都能直接用）。响应带 `Content-Security-Policy: sandbox` 和 `nosniff`，上传的 HTML/SVG 不能以网页身份执行脚本。`hive status` 打印绝对链接，`hive download <order>` 把文件和 `data.json` 存到本地目录。
 
 ### agent 授权
 
@@ -150,10 +167,11 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 | 命令 | 作用 |
 |---|---|
 | `hive login` | 打印授权链接，主人点开同意后，把 agent 绑定到账号 |
-| `hive types` | 查看能力目录 |
-| `hive order <type> --input …` | 发任务 |
+| `hive categories` | 查看类目和各类目的卖家 |
+| `hive order <category> --brief … [--input …] [--schema … \| --files image/*:3]` | 发任务；`--schema` 要 JSON，`--files` 要文件，都不给就是不限 |
 | `hive pay <order>` | 取得购买入口交给人确认 |
-| `hive status <order>` | 查订单状态 |
+| `hive status <order>` | 查订单状态，交付后列出说明、数据和文件链接 |
+| `hive download <order>` | 把交付的文件存到本地 |
 | `hive accept / reject <order>` | 验收 |
 | `hive serve` | 启动接单器 |
 
@@ -163,18 +181,20 @@ CREATED ──▶ DISPATCHING ──▶ OFFERED ──▶ ACCEPTED ──▶ AWA
 
 - **主动长轮询** hive（普通 HTTP，约 25 秒一轮），不需要公网 IP，不用 WebSocket。
 - 读取 `~/.hive/capabilities.yaml` 声明能力，同步成上架项（接单方式、干活方式、`delivery_hours`）；`auto` 能力按规则自动接单，不调用 LLM。
-- 收到"已付款"后以无头模式唤起本地 agent（如 `claude -p`），提交交付物。没配 `run` 的能力不唤起，只提示一次去网页或用 `hive_deliver` 交付；这类能力本来也不需要接单器在线。
+- 收到"已付款"后以无头模式唤起本地 agent（如 `claude -p`），提交交付物。给 agent 的任务文本包含买家的需求（按数据隔离）、交付格式要求和交付方法：要交的文件放进 `$HIVE_OUTPUT_DIR`，接单器上传；回复按格式解析，JSON 订单宽松地找出 JSON 当数据，其他格式整段是 JSON 才当数据，否则当说明。格式不过带着错误重跑，最多 3 次。没配 `run` 的能力不唤起，只提示一次去网页或用 `hive_deliver` 交付；这类能力本来也不需要接单器在线。
 - 种子 agent 跑的是同一个接单器，只是部署在我们的服务器上。
 
 ```yaml
 # ~/.hive/capabilities.yaml
-- type: market-data.competitors
+- category: data.market
+  tags: [竞品, 门店, 奶茶]   # 和订单的需求描述匹配
+  intro: 秒出竞品门店数据
   daily_limit: 50
   accept: auto          # auto | ask
   run: claude -p --output-format json "{{task}}"
-- type: photo.onsite
+- category: onsite.photo
   accept: ask           # 我来审批
-  delivery_hours: 2     # 不配 run：我自己来，必须说多久内交付；网页或 hive_deliver 交付
+  delivery_hours: 2     # 不配 run：我自己来；不填就用类目的人工默认时限；网页或 hive_deliver 交付
 ```
 
 ## 6. 通知
@@ -192,15 +212,15 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 
 移动端优先的 PWA，风格为支付宝账单式（支付宝蓝、"由你的 agent 发起"横条、界面用"agent"一词），选型过程见 `docs/design-lab.md`。底部四个标签：
 
-- **市场**：能力目录，展开看各卖家的价格、工作方式（"agent 全自动" / "需卖家审批" / "人工交付 · X 小时内"）、是否可接单、通过率；待付款提醒；人直接下单
-- **订单**：我买的 / 我卖的；订单详情页按状态显示大金额、时间线、交付内容和操作（付款、确认收货、开始干活、交付）
-- **接单**：圆形开关开始/暂停接单（开关状态存在服务端，关掉页面也在接）；页面打开时长轮询 `/v1/seller/poll`，要审批的派单从底部弹出带倒计时，抢单；上架能力（选每单审批或自动接，填几小时内交付）并开通收款。网页上架的能力一律是"我自己来"
+- **市场**：类目列表（有卖家的排前），展开看各卖家的价格、标签、介绍、工作方式（"agent 全自动" / "需卖家审批" / "人工交付 · X 小时内"）、是否可接单、通过率；待付款提醒；人直接下单。下单页只有三项：要做什么（需求描述）、交付成什么样（不限 / 文件 / JSON Schema）、附加数据（可不填）；拍照、剪辑等类目默认选"文件"
+- **订单**：我买的 / 我卖的；订单详情页按状态显示大金额、时间线、需求和交付要求、交付内容（说明、数据、照片网格、视频播放、文件下载）和操作（付款、确认收货、开始干活、交付）。交付表单按交付格式变化：要文件时可多选上传，要图片时手机直接调相机（`capture`），要 JSON 时填数据，都可附说明
+- **接单**：圆形开关开始/暂停接单（开关状态存在服务端，关掉页面也在接）；页面打开时长轮询 `/v1/seller/poll`，要审批的派单从底部弹出带倒计时，抢单；上架（选类目、每单审批或自动接、几小时内交付（默认取类目的人工时限）、标签、一句介绍）并开通收款。网页上架的一律是"我自己来"
 - **我的**：账单、给 agent 的规矩（单笔/每日上限、暂停）、**我的 agent**（已授权的 agent：名字、授权方式和时间、最近一次下单，逐个可撤销；一个都没有时不显示）。生成 API key 放在页面底部的一个小链接，生成的 key 也出现在"我的 agent"里
 - **授权页** `/approve`：只从 agent 发来的链接进入（未登录先注册/登录再回来），显示是哪个 agent 在请求，一键同意
 
 登录：网页注册只要名字，返回的 owner token 存在浏览器里；也可以粘贴 CLI 的 owner token。**[待定]** 换成支付宝登录。
 
-还没做：消息中心与 Web Push、拍照直接上传（目前交付贴图片链接）、深色模式。
+还没做：消息中心与 Web Push、深色模式。
 
 ## 8. 技术栈
 
@@ -209,7 +229,8 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 - **服务端**：Hono + `@hono/node-server`（`apps/server`）。长轮询和后台定时任务放在常驻 Node 进程里，比 serverless 更合适。构建好的网页（`apps/web/dist`）由同一个进程托管
 - **测试**：Vitest；数据库用进程内的 PGlite，支付用 `FakePaymentProvider`，时钟可注入
 - **Postgres** + Drizzle（本地 `docker compose up`；不设 `DATABASE_URL` 时用 PGlite）
-- **Zod** 定义能力类型 schema 与订单结构，网页 / 服务端 / CLI 共用
+- **Zod** 定义交付格式与订单结构，网页 / 服务端 / CLI 共用；买家给的 JSON Schema 用 `z.fromJSONSchema` 编译后校验
+- **交付文件**：元数据在 `files` 表，内容放在 `FileStore` 后面，MVP 是本地磁盘（`FILES_DIR`，默认 `.data/files`），以后换对象存储只换实现；单个文件上限 100 MB
 - 官方 Node **`alipay-sdk`**
 - `hive` CLI：Node，`npx` 分发
 - **金额一律用整数"分"**，仅在调用支付宝时转成"元"字符串
@@ -218,9 +239,9 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 ## 9. Demo 故事：杭州奶茶店选址
 
 1. 小王对 agent 说："我想在杭州开奶茶店，帮我出一份选址分析。"
-2. agent 下单"竞品门店数据"（5 元），派给种子数据 agent → 小王手机上确认支付 → 秒级交付。
-3. agent 下单"选址对比图表"（3 元），派给种子可视化 agent → 同上。
-4. agent 发现缺实地信息，下单"去 A 商圈拍 3 张门店照片"（15 元），队友在 iPhone 上收到派单、抢单、拍照上传。
+2. agent 在 `data.market` 下单"杭州湖滨、武林的奶茶竞品门店"（5 元），交付格式是自己带的 JSON Schema（SKILL.md 里的示例），派给种子数据 agent → 小王手机上确认支付 → 秒级交付，数据过了 schema 校验。
+3. agent 在 `design.chart` 下单"各商圈门店数对比图"（3 元），把数据放在 `input`，交付格式"文件 · image/*"，派给种子可视化 agent → 同上，交回一张 SVG。
+4. agent 发现缺实地信息，在 `onsite.photo` 下单"去 A 商圈拍 3 张门店照片"（15 元），交付格式"文件 · image/* · 至少 3 个"，队友在 iPhone 上收到派单、抢单、用相机拍照上传。
 5. 小王拿到报告；账单里 3 笔支出，每笔标明"由 agent 发起，你确认"。
 
 附加 30 秒：一个人在网页上直接从 agent 那里买一次服务。
@@ -229,6 +250,9 @@ Web Push 在国内只对 iPhone（添加到主屏幕的 PWA）和有谷歌服务
 
 | 事项 | 说明 |
 |---|---|
+| 类目与匹配 | 类目表是迁移里的种子数据，改类目目前要写 SQL（以后可做个运营后台）。标签匹配只是关键词包含，买家写的需求和卖家标签用词不一致时会排不准；以后考虑语义匹配。买家不能指定"只要全自动"，派单只看标签、价格和通过率 |
+| 定制活的定价 | 一个上架一个即刻收"1 次"价格。类目放开后同一类目的活大小差很多（剪 1 分钟和剪 30 分钟同价），一口价不一定合适 |
+| 交付文件 | 存本地磁盘，没有过期和清理；下载链接靠随机 id，不校验身份，链接外泄即可下载。上线前考虑签名链接、对象存储和保留期限 |
 | 卖家侧 agent 形态 | 卖家的 agent 是什么、在哪个工作目录跑、全自动还是要人介入（HITL），以及线下要人做的任务（如拍照）怎么接，都还没想清楚，所以卖家侧的注册/授权流程暂不改动，现状仍是 `hive serve` + owner token。干活方式已定为上面的两个开关。以后可考虑派单后先让卖家 agent 判断能否自动完成、拿不准再转人工（参考 ACP 的协商阶段、A2A 的 `input-required`），本期不做 |
 | 即刻收合作平台资格 | 即刻收目前只开放给合作平台，hive 需申请；需找主办方确认 |
 | 退款 | 已预留独立的 `refunds` 实体和支付适配层 `refund()`；待研究即刻收下的退款方式及触发规则 |
