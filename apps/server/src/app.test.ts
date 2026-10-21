@@ -114,11 +114,15 @@ describe("remote MCP", () => {
   });
 });
 
-it("lists capability types with JSON schemas", async () => {
+it("lists capability types with JSON schemas and how each seller works", async () => {
   const t = await setup();
+  await t.agentSeller("data-agent", DATA);
+  await t.humanSeller("wang", PHOTO, 1500, { deliveryHours: 3 });
   const types = await t.ok("GET", "/v1/types");
   expect(types.map((x: { type: string }) => x.type)).toEqual([DATA, "chart.compare", PHOTO]);
   expect(types[0].input.type).toBe("object");
+  expect(types[0].sellers[0]).toMatchObject({ name: "data-agent", workStyle: "agent 全自动", workTimeoutMs: 10 * 60_000 });
+  expect(types[2].sellers[0]).toMatchObject({ name: "wang", workStyle: "需卖家审批 · 人工交付 · 3 小时内", workTimeoutMs: 3 * 3600_000 });
 });
 
 it("lists priced listings in the market, cheapest first, with presence", async () => {
@@ -133,8 +137,8 @@ it("lists priced listings in the market, cheapest first, with presence", async (
   const byType = Object.fromEntries(market.map((m: { type: string }) => [m.type, m]));
   expect(byType[DATA].title).toBe("竞品门店数据");
   expect(byType[DATA].sellers.map((s: { name: string }) => s.name)).toEqual(["cheap", "pricey"]);
-  expect(byType[DATA].sellers[0]).toMatchObject({ kind: "agent", priceFen: 300, online: true, completed: 0, passRate: null });
-  expect(byType[PHOTO].sellers[0]).toMatchObject({ name: "wang", kind: "human", online: false });
+  expect(byType[DATA].sellers[0]).toMatchObject({ workMode: "agent", acceptMode: "auto", priceFen: 300, online: true, completed: 0, passRate: null });
+  expect(byType[PHOTO].sellers[0]).toMatchObject({ name: "wang", workMode: "manual", acceptMode: "ask", online: false });
   expect(byType["chart.compare"].sellers).toEqual([]);
 });
 
@@ -273,6 +277,46 @@ describe("dispatch", () => {
     expect((await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] })).status).toBe("CANCELLED");
     await t.ok("GET", "/v1/seller/poll?listener=1", owner.token);
     expect((await t.ok("POST", "/v1/orders", buyer.token, { type: DATA, input: inputs[DATA] })).status).toBe("OFFERED");
+  });
+
+  it("dispatches to a seller who works by hand without a listener, as long as they were active", async () => {
+    const t = await setup();
+    const h = await t.humanSeller("wang", PHOTO);
+    const buyer = await t.account("buyer");
+    t.advance(23 * 3600_000); // no listener and the 接单台 closed: still taking orders
+    await t.ok("GET", "/v1/me", buyer.token);
+    expect((await t.ok("POST", "/v1/orders", buyer.token, { type: PHOTO, input: inputs[PHOTO] })).status).toBe("OFFERED");
+    expect((await t.ok("GET", "/v1/notifications", h.token))[0].kind).toBe("offer");
+
+    t.advance(25 * 3600_000); // gone quiet for over a day: no more orders
+    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: PHOTO, input: inputs[PHOTO] });
+    expect(o.status).toBe("CANCELLED");
+  });
+
+  it("takes the order for an auto listing done by hand and times the work by the seller's promise", async () => {
+    const t = await setup();
+    const h = await t.humanSeller("wang", PHOTO, 1500, { acceptMode: "auto", deliveryHours: 5 });
+    const buyer = await t.account("buyer");
+    const o = await t.ok("POST", "/v1/orders", buyer.token, { type: PHOTO, input: inputs[PHOTO] });
+    expect(o).toMatchObject({ status: "AWAITING_PAYMENT", sellerAccountId: h.id });
+
+    await t.pay(o);
+    const paid = await t.ok("POST", `/v1/orders/${o.id}/check-payment`, buyer.token);
+    expect(new Date(paid.deadline).getTime() - new Date(paid.paidAt).getTime()).toBe(5 * 3600_000);
+    // No listener is up, and none is needed: the heartbeat check leaves it alone.
+    t.advance(4 * 3600_000);
+    await t.hive.tick();
+    expect((await t.ok("GET", `/v1/orders/${o.id}`, buyer.token)).status).toBe("PAID");
+    await t.ok("POST", `/v1/orders/${o.id}/start`, h.token);
+    await t.ok("POST", `/v1/orders/${o.id}/deliver`, h.token, { output: validOutputs[PHOTO] });
+    expect((await t.ok("GET", `/v1/orders/${o.id}`, buyer.token)).status).toBe("DELIVERED");
+  });
+
+  it("requires a delivery time for listings done by hand", async () => {
+    const t = await setup();
+    const h = await t.account("wang");
+    const r = await t.call("PUT", `/v1/listings/${PHOTO}`, h.token, { acceptMode: "ask", workMode: "manual", dailyLimit: 5 });
+    expect(r).toMatchObject({ status: 422, body: { error: "delivery_hours_required" } });
   });
 
   it("wakes a waiting long-poll when an offer arrives", async () => {

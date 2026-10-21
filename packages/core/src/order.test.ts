@@ -113,6 +113,17 @@ describe("payment", () => {
 });
 
 describe("work and delivery", () => {
+  it("starts the work clock at payment, using the seller's promised time when there is one", () => {
+    expect(toPaid().deadline).toEqual(at(10 * 60_000));
+    const manual = apply(
+      toOffered(),
+      { type: "seller_accept", sellerAccountId: "s1", priceFen: fen(500), workTimeoutMs: 24 * 3600_000 },
+      { type: "payment_requested", purchaseUrl: "https://pay.example/1" },
+      { type: "payment_confirmed", paymentRef: "T1" },
+    );
+    expect(manual.deadline).toEqual(at(24 * 3600_000));
+  });
+
   it("lets the seller resubmit a malformed delivery", () => {
     let o = apply(toPaid(), { type: "work_started" });
     o = apply(o, { type: "delivery_submitted", output: { nope: true } });

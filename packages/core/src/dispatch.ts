@@ -1,12 +1,37 @@
-import type { CapabilityType } from "./capabilities.ts";
+import { capabilityTypes, type CapabilityType } from "./capabilities.ts";
 import type { Fen } from "./money.ts";
 import type { SellerKind } from "./order.ts";
+
+// A listing's two switches (design §2): who takes the order, and who does the work.
+export type AcceptMode = "auto" | "ask";
+// `agent`: the listener wakes the seller's agent once paid. `manual`: a person does it and
+// delivers from the app or by driving their agent over MCP, so no listener needs to be up.
+export type WorkMode = "agent" | "manual";
+
+// Only the fully automatic combination is held to the listener's heartbeat.
+export const needsListener = (l: { acceptMode: AcceptMode; workMode: WorkMode }) =>
+  l.acceptMode === "auto" && l.workMode === "agent";
+
+// Manual work runs on the seller's own promise; agents get the type's default.
+export function workTimeoutMs(type: CapabilityType, workMode: WorkMode, deliveryHours: number | null): number {
+  if (workMode === "manual" && deliveryHours !== null) return deliveryHours * 3600_000;
+  return capabilityTypes[type].workTimeoutMs;
+}
+
+// How a seller works, as the market and buyer agents see it.
+export function workStyle(l: { acceptMode: AcceptMode; workMode: WorkMode; deliveryHours: number | null }): string {
+  if (needsListener(l)) return "agent 全自动";
+  const manual = l.workMode === "manual" ? `人工交付${l.deliveryHours === null ? "" : ` · ${l.deliveryHours} 小时内`}` : "agent 交付";
+  return l.acceptMode === "ask" ? `需卖家审批 · ${manual}` : manual;
+}
 
 export interface Listing {
   sellerAccountId: string;
   capabilityType: CapabilityType;
   priceFen: Fen;
-  acceptMode: "auto" | "ask";
+  acceptMode: AcceptMode;
+  workMode: WorkMode;
+  // Fully automatic: the listener is polling. Otherwise: the seller is taking orders and was active recently.
   online: boolean;
   dailyLimit: number;
   ordersToday: number;
@@ -27,7 +52,8 @@ export interface DispatchRequest {
   passedBy: readonly string[];
 }
 
-export type Offer = { sellerAccountIds: string[]; kind: SellerKind } | null;
+// `platformAccepts`: an auto listing done by hand has no listener to answer, so hive accepts for the seller.
+export type Offer = { sellerAccountIds: string[]; kind: SellerKind; platformAccepts: boolean } | null;
 
 export function rankCandidates(listings: readonly Listing[], req: DispatchRequest): Listing[] {
   return listings
@@ -47,13 +73,15 @@ export function rankCandidates(listings: readonly Listing[], req: DispatchReques
     );
 }
 
-// Agent sellers answer in seconds, so offer them one at a time. Humans are slow,
-// so the best-ranked human triggers a broadcast to the next few humans in rank order.
+// Auto listings take the order at once, so offer them one at a time. Humans approving are slow,
+// so the best-ranked `ask` seller triggers a broadcast to the next few in rank order.
 export function nextOffer(listings: readonly Listing[], req: DispatchRequest): Offer {
   const ranked = rankCandidates(listings, req);
   const top = ranked[0];
   if (!top) return null;
-  if (top.acceptMode === "auto") return { sellerAccountIds: [top.sellerAccountId], kind: "agent" };
+  if (top.acceptMode === "auto") {
+    return { sellerAccountIds: [top.sellerAccountId], kind: "agent", platformAccepts: top.workMode === "manual" };
+  }
   const humans = ranked.filter((l) => l.acceptMode === "ask").slice(0, HUMAN_BROADCAST);
-  return { sellerAccountIds: humans.map((l) => l.sellerAccountId), kind: "human" };
+  return { sellerAccountIds: humans.map((l) => l.sellerAccountId), kind: "human", platformAccepts: false };
 }

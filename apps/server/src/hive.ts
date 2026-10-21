@@ -9,12 +9,16 @@ import {
   fen,
   isCapabilityType,
   newOrder,
+  needsListener,
   nextOffer,
   transition,
+  workStyle,
+  workTimeoutMs,
   type CapabilityType,
   type Fen,
   type Listing,
   type OrderEvent,
+  type WorkMode,
 } from "@hive/core";
 import type { Db } from "./db/client.ts";
 import { accounts, deviceLogins, listings, notifications, orderEvents, orders, tokens } from "./db/schema.ts";
@@ -39,10 +43,14 @@ export class HiveError extends Error {
   }
 }
 
-// A listener or human that hasn't checked in for this long is offline.
+// A listener that hasn't polled for this long is offline.
 export const PRESENCE_TTL_MS = 60_000;
-// An agent seller whose listener goes quiet this long mid-order has abandoned it (design §3, #12).
+// A fully automatic seller whose listener goes quiet this long mid-order has abandoned it (design §3, #12).
 export const HEARTBEAT_LOST_MS = 2 * 60_000;
+// Listings that need a person are dispatched while the seller used hive (app, CLI or MCP) this recently.
+export const ACTIVE_TTL_MS = 24 * 3600_000;
+// How often an authenticated request refreshes accounts.active_at.
+const ACTIVE_WRITE_EVERY_MS = 60_000;
 const DEVICE_LOGIN_TTL_MS = 10 * 60_000;
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -101,7 +109,14 @@ export class Hive {
       .select({ accountId: tokens.accountId, actor: tokens.actor, tokenId: tokens.id })
       .from(tokens)
       .where(and(eq(tokens.tokenHash, sha256(token)), isNull(tokens.revokedAt)));
-    return row ?? null;
+    if (!row) return null;
+    // Any authenticated use counts as activity; written at most once a minute.
+    const stale = new Date(this.now().getTime() - ACTIVE_WRITE_EVERY_MS);
+    await this.db
+      .update(accounts)
+      .set({ activeAt: this.now() })
+      .where(and(eq(accounts.id, row.accountId), sql`coalesce(${accounts.activeAt}, 'epoch'::timestamptz) < ${stale}`));
+    return row;
   }
 
   async startDeviceLogin(label: string | null) {
@@ -201,9 +216,30 @@ export class Hive {
 
   // ---- listings ---------------------------------------------------------
 
-  async upsertListing(p: Principal, type: string, opts: { acceptMode: "auto" | "ask"; dailyLimit: number; active?: boolean }) {
+  async upsertListing(
+    p: Principal,
+    type: string,
+    opts: {
+      acceptMode: "auto" | "ask";
+      workMode?: WorkMode | undefined;
+      deliveryHours?: number | null | undefined;
+      dailyLimit: number;
+      active?: boolean | undefined;
+    },
+  ) {
     if (!isCapabilityType(type)) throw new HiveError(404, "unknown_type", `unknown capability type ${type}`);
-    const values = { acceptMode: opts.acceptMode, dailyLimit: opts.dailyLimit, active: opts.active ?? true };
+    const workMode = opts.workMode ?? "agent";
+    // Manual work is timed by the seller's own promise, so it has to be given.
+    if (workMode === "manual" && !opts.deliveryHours) {
+      throw new HiveError(422, "delivery_hours_required", "say how many hours you need to deliver work done by hand");
+    }
+    const values = {
+      acceptMode: opts.acceptMode,
+      workMode,
+      deliveryHours: workMode === "manual" ? opts.deliveryHours! : null,
+      dailyLimit: opts.dailyLimit,
+      active: opts.active ?? true,
+    };
     const [row] = await this.db
       .insert(listings)
       .values({ id: newId("lst"), sellerAccountId: p.accountId, capabilityType: type, ...values })
@@ -244,16 +280,12 @@ export class Hive {
 
   async setHumanAccepting(p: Principal, on: boolean) {
     if (p.actor !== "human") throw new HiveError(403, "humans_only", "agents go online with `hive serve`");
-    await this.db
-      .update(accounts)
-      .set({ humanAccepting: on, humanSeenAt: this.now() })
-      .where(eq(accounts.id, p.accountId));
+    await this.db.update(accounts).set({ humanAccepting: on }).where(eq(accounts.id, p.accountId));
   }
 
-  // `hive serve` polls as a listener even with an owner token; other polls default by actor.
-  private async touchPresence(p: Principal, asListener: boolean) {
-    const set = asListener ? { listenerSeenAt: this.now() } : { humanSeenAt: this.now() };
-    await this.db.update(accounts).set(set).where(eq(accounts.id, p.accountId));
+  // `hive serve` polls as a listener even with an owner token; other polls are just activity.
+  private async touchListener(p: Principal) {
+    await this.db.update(accounts).set({ listenerSeenAt: this.now() }).where(eq(accounts.id, p.accountId));
   }
 
   // ---- orders: buyer side -----------------------------------------------
@@ -330,19 +362,29 @@ export class Hive {
   // ---- orders: seller side ----------------------------------------------
 
   async acceptOffer(p: Principal, orderId: string) {
+    await this.acceptFor(p.accountId, orderId);
+    return this.getOrder(p, orderId);
+  }
+
+  private async acceptFor(sellerAccountId: string, orderId: string) {
     const row = await this.loadOrder(orderId);
     const [listing] = await this.db
       .select()
       .from(listings)
-      .where(and(eq(listings.sellerAccountId, p.accountId), eq(listings.capabilityType, row.capabilityType)));
+      .where(and(eq(listings.sellerAccountId, sellerAccountId), eq(listings.capabilityType, row.capabilityType)));
     if (!listing || listing.priceFen === null) throw new HiveError(409, "listing_not_ready", "no priced listing for this type");
+    const type = row.capabilityType as CapabilityType;
     await this.apply(
       orderId,
-      { type: "seller_accept", sellerAccountId: p.accountId, priceFen: fen(listing.priceFen) },
+      {
+        type: "seller_accept",
+        sellerAccountId,
+        priceFen: fen(listing.priceFen),
+        workTimeoutMs: workTimeoutMs(type, listing.workMode, listing.deliveryHours),
+      },
       { listingId: listing.id },
     );
     await this.requestPayment(orderId);
-    return this.getOrder(p, orderId);
   }
 
   async declineOffer(p: Principal, orderId: string) {
@@ -388,7 +430,7 @@ export class Hive {
 
   // Long-poll for `hive serve` and the human 接单台: offers to answer and paid orders to work on.
   async pollSeller(p: Principal, waitMs: number, asListener = p.actor === "agent") {
-    await this.touchPresence(p, asListener);
+    if (asListener) await this.touchListener(p);
     const deadline = Date.now() + waitMs;
     for (;;) {
       const work = await this.sellerInbox(p.accountId);
@@ -445,8 +487,8 @@ export class Hive {
   }
 
   // Public catalog: every capability type with its sellable listings, cheapest and most reliable first.
+  // Each seller says how they work, so a buyer (or their agent) can tell instant from by-hand.
   async market() {
-    const fresh = new Date(this.now().getTime() - PRESENCE_TTL_MS);
     const today = startOfShanghaiDay(this.now());
     const rows = await this.db
       .select({ listing: listings, account: accounts })
@@ -460,9 +502,12 @@ export class Hive {
       const list = sellers.get(listing.capabilityType) ?? [];
       list.push({
         name: account.name,
-        kind: listing.acceptMode === "auto" ? "agent" : "human",
+        acceptMode: listing.acceptMode,
+        workMode: listing.workMode,
+        workStyle: workStyle(listing),
+        workTimeoutMs: workTimeoutMs(listing.capabilityType as CapabilityType, listing.workMode, listing.deliveryHours),
         priceFen: listing.priceFen,
-        online: isOnline(listing, account, fresh),
+        online: this.isOnline(listing, account),
         passRate: stats.passRate,
         completed: stats.completed,
       });
@@ -536,7 +581,8 @@ export class Hive {
     const awaiting = await this.db.select({ id: orders.id }).from(orders).where(eq(orders.status, "AWAITING_PAYMENT"));
     for (const { id } of awaiting) await this.detectPayment(id);
 
-    // Agent sellers must keep polling while they hold a paid order; humans are out doing the job.
+    // Fully automatic sellers must keep polling while they hold a paid order; anything a person
+    // works on (approved or by hand) runs on its deadline alone.
     const quiet = new Date(now.getTime() - HEARTBEAT_LOST_MS);
     const lost = await this.db
       .select({ id: orders.id })
@@ -547,6 +593,7 @@ export class Hive {
         and(
           inArray(orders.status, RESERVING),
           eq(listings.acceptMode, "auto"),
+          eq(listings.workMode, "agent"),
           sql`coalesce(${accounts.listenerSeenAt}, 'epoch'::timestamptz) < ${quiet}`,
         ),
       );
@@ -614,11 +661,11 @@ export class Hive {
       return;
     }
     await this.apply(id, { type: "offer", sellerAccountIds: offer.sellerAccountIds, kind: offer.kind });
+    if (offer.platformAccepts) await this.acceptFor(offer.sellerAccountIds[0]!, id);
   }
 
   private async candidateListings(type: CapabilityType): Promise<Listing[]> {
     const now = this.now();
-    const fresh = new Date(now.getTime() - PRESENCE_TTL_MS);
     const rows = await this.db
       .select({ listing: listings, account: accounts })
       .from(listings)
@@ -628,13 +675,14 @@ export class Hive {
     const out: Listing[] = [];
     for (const { listing, account } of rows) {
       if (listing.priceFen === null) continue;
-      const online = isOnline(listing, account, fresh);
+      const online = this.isOnline(listing, account);
       const stats = await this.sellerStats(listing.sellerAccountId, type, today);
       out.push({
         sellerAccountId: listing.sellerAccountId,
         capabilityType: type,
         priceFen: fen(listing.priceFen),
         acceptMode: listing.acceptMode,
+        workMode: listing.workMode,
         online,
         dailyLimit: listing.dailyLimit,
         ordersToday: stats.ordersToday,
@@ -642,6 +690,14 @@ export class Hive {
       });
     }
     return out;
+  }
+
+  // Fully automatic sellers are online while `hive serve` polls. Listings that need a person are
+  // online while the seller's switch is on and they used hive recently; they don't need a listener.
+  private isOnline(listing: typeof listings.$inferSelect, account: typeof accounts.$inferSelect) {
+    const ago = (ms: number) => new Date(this.now().getTime() - ms);
+    if (needsListener(listing)) return (account.listenerSeenAt ?? new Date(0)) > ago(PRESENCE_TTL_MS);
+    return account.humanAccepting && (account.activeAt ?? new Date(0)) > ago(ACTIVE_TTL_MS);
   }
 
   private async sellerStats(sellerAccountId: string, type: string, today: Date) {
@@ -751,13 +807,6 @@ export class Hive {
         break;
     }
   }
-}
-
-// Agent sellers are online while `hive serve` polls; human sellers while they keep the 接单台 open.
-function isOnline(listing: typeof listings.$inferSelect, account: typeof accounts.$inferSelect, fresh: Date) {
-  return listing.acceptMode === "auto"
-    ? (account.listenerSeenAt ?? new Date(0)) > fresh
-    : account.humanAccepting && (account.humanSeenAt ?? new Date(0)) > fresh;
 }
 
 // Order as exposed over the API.

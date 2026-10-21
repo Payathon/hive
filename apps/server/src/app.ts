@@ -42,17 +42,20 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
 
   // ---- public -----------------------------------------------------------
 
-  app.get("/v1/types", (c) =>
-    c.json(
+  // Schemas plus who sells each type and how they work, so a buyer agent can choose before ordering.
+  app.get("/v1/types", async (c) => {
+    const sellers = new Map((await hive.market()).map((m) => [m.type, m.sellers]));
+    return c.json(
       Object.entries(capabilityTypes).map(([type, t]) => ({
         type,
         title: t.title,
         workTimeoutMs: t.workTimeoutMs,
         input: z.toJSONSchema(t.input),
         output: z.toJSONSchema(t.output),
+        sellers: sellers.get(type) ?? [],
       })),
-    ),
-  );
+    );
+  });
 
   app.get("/v1/market", async (c) => c.json(await hive.market()));
 
@@ -155,12 +158,13 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
       c,
       z.object({
         acceptMode: z.enum(["auto", "ask"]),
+        workMode: z.enum(["agent", "manual"]).optional(),
+        deliveryHours: z.number().int().positive().max(24 * 30).nullable().optional(),
         dailyLimit: z.number().int().positive().max(10_000),
         active: z.boolean().optional(),
       }),
     );
-    const { active, ...rest } = opts;
-    return c.json(await hive.upsertListing(me(c), c.req.param("type"), active === undefined ? rest : { ...rest, active }));
+    return c.json(await hive.upsertListing(me(c), c.req.param("type"), opts));
   });
 
   authed.post("/listings/:type/payment-setup", async (c) =>

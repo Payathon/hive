@@ -20,10 +20,11 @@ export const accounts = pgTable("accounts", {
   perOrderCapFen: integer("per_order_cap_fen"),
   dailyCapFen: integer("daily_cap_fen"),
   paused: boolean("paused").notNull().default(false),
-  // Human seller presence: they explicitly start accepting and keep a heartbeat.
-  humanAccepting: boolean("human_accepting").notNull().default(false),
-  humanSeenAt: ts("human_seen_at"),
-  // Agent seller presence: the `hive serve` listener's last poll.
+  // The 接单台 switch: listings that need a person are only dispatched while it's on.
+  humanAccepting: boolean("human_accepting").notNull().default(true),
+  // Last authenticated request from any client (app, CLI, MCP); "active" for listings that need a person.
+  activeAt: ts("active_at"),
+  // Fully automatic presence: the `hive serve` listener's last poll.
   listenerSeenAt: ts("listener_seen_at"),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
@@ -66,6 +67,9 @@ export const listings = pgTable(
       .references(() => accounts.id),
     capabilityType: text("capability_type").notNull(),
     acceptMode: text("accept_mode", { enum: ["auto", "ask"] }).notNull(),
+    // Who does the work once paid (design §2); `manual` work is timed by the seller's own promise.
+    workMode: text("work_mode", { enum: ["agent", "manual"] }).notNull().default("agent"),
+    deliveryHours: integer("delivery_hours"),
     dailyLimit: integer("daily_limit").notNull(),
     active: boolean("active").notNull().default(true),
     // Synced from the payment provider: the seller sets the price on Alipay's hosted page.
@@ -99,6 +103,7 @@ export const orders = pgTable(
     sellerAccountId: text("seller_account_id").references(() => accounts.id),
     listingId: text("listing_id").references(() => listings.id),
     priceFen: integer("price_fen"),
+    workTimeoutMs: integer("work_timeout_ms"),
     purchaseRequestNo: text("purchase_request_no"),
     purchaseUrl: text("purchase_url"),
     purchaseQrCode: text("purchase_qr_code"),

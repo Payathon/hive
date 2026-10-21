@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { fen } from "./money.ts";
-import { nextOffer, rankCandidates, type DispatchRequest, type Listing } from "./dispatch.ts";
+import { nextOffer, rankCandidates, workStyle, workTimeoutMs, type DispatchRequest, type Listing } from "./dispatch.ts";
 
 const listing = (over: Partial<Listing> & { sellerAccountId: string }): Listing => ({
   capabilityType: "market-data.competitors",
   priceFen: fen(500),
   acceptMode: "auto",
+  workMode: "agent",
   online: true,
   dailyLimit: 10,
   ordersToday: 0,
@@ -51,15 +52,34 @@ describe("rankCandidates", () => {
 describe("nextOffer", () => {
   it("offers a single agent seller", () => {
     const offer = nextOffer([listing({ sellerAccountId: "a1" }), listing({ sellerAccountId: "a2" })], req);
-    expect(offer).toEqual({ sellerAccountIds: ["a1"], kind: "agent" });
+    expect(offer).toEqual({ sellerAccountIds: ["a1"], kind: "agent", platformAccepts: false });
   });
 
   it("broadcasts to up to three humans", () => {
     const humans = ["h1", "h2", "h3", "h4"].map((id) => listing({ sellerAccountId: id, acceptMode: "ask" }));
-    expect(nextOffer(humans, req)).toEqual({ sellerAccountIds: ["h1", "h2", "h3"], kind: "human" });
+    expect(nextOffer(humans, req)).toEqual({ sellerAccountIds: ["h1", "h2", "h3"], kind: "human", platformAccepts: false });
+  });
+
+  it("has hive accept for an auto listing done by hand", () => {
+    const offer = nextOffer([listing({ sellerAccountId: "m1", workMode: "manual" })], req);
+    expect(offer).toEqual({ sellerAccountIds: ["m1"], kind: "agent", platformAccepts: true });
   });
 
   it("returns null when nobody qualifies", () => {
     expect(nextOffer([], req)).toBeNull();
+  });
+});
+
+describe("work styles", () => {
+  it("labels each combination of the two switches", () => {
+    expect(workStyle({ acceptMode: "auto", workMode: "agent", deliveryHours: null })).toBe("agent 全自动");
+    expect(workStyle({ acceptMode: "ask", workMode: "agent", deliveryHours: null })).toBe("需卖家审批 · agent 交付");
+    expect(workStyle({ acceptMode: "auto", workMode: "manual", deliveryHours: 24 })).toBe("人工交付 · 24 小时内");
+    expect(workStyle({ acceptMode: "ask", workMode: "manual", deliveryHours: 2 })).toBe("需卖家审批 · 人工交付 · 2 小时内");
+  });
+
+  it("times manual work by the seller's promise and agents by the type", () => {
+    expect(workTimeoutMs("photo.onsite", "manual", 3)).toBe(3 * 3600_000);
+    expect(workTimeoutMs("photo.onsite", "agent", 3)).toBe(120 * 60_000);
   });
 });

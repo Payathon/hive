@@ -67,9 +67,20 @@ export async function setup() {
     return { ...human, agent, listingId: listing.id as string };
   }
 
-  async function humanSeller(name: string, type: keyof typeof validOutputs, priceFen = 1500) {
+  // A person who approves each order and does the work by hand, as listed from the web 接单台.
+  async function humanSeller(
+    name: string,
+    type: keyof typeof validOutputs,
+    priceFen = 1500,
+    opts: { acceptMode?: "auto" | "ask"; deliveryHours?: number } = {},
+  ) {
     const human = await account(name);
-    const listing = await ok("PUT", `/v1/listings/${type}`, human.token, { acceptMode: "ask", dailyLimit: 5 });
+    const listing = await ok("PUT", `/v1/listings/${type}`, human.token, {
+      acceptMode: opts.acceptMode ?? "ask",
+      workMode: "manual",
+      deliveryHours: opts.deliveryHours ?? 2,
+      dailyLimit: 5,
+    });
     payments.setPrice(listing.id, fen(priceFen));
     await ok("POST", `/v1/listings/${type}/payment-setup`, human.token);
     await ok("POST", "/v1/seller/accepting", human.token, { on: true });

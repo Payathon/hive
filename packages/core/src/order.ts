@@ -46,6 +46,8 @@ export interface Order {
   passedBy: string[];
   sellerAccountId: string | null;
   priceFen: Fen | null;
+  // Set on accept from the seller's listing; the work clock uses it once paid.
+  workTimeoutMs: number | null;
   purchaseUrl: string | null;
   // Opaque reference to whatever proved payment (e.g. the 即刻收 purchase request number).
   paymentRef: string | null;
@@ -63,7 +65,7 @@ export type OrderEvent =
   | { type: "dispatch" }
   | { type: "offer"; sellerAccountIds: string[]; kind: SellerKind }
   | { type: "no_candidates" }
-  | { type: "seller_accept"; sellerAccountId: string; priceFen: Fen }
+  | { type: "seller_accept"; sellerAccountId: string; priceFen: Fen; workTimeoutMs?: number }
   | { type: "seller_decline"; sellerAccountId: string }
   | { type: "offer_expired" }
   | { type: "payment_requested"; purchaseUrl: string }
@@ -93,6 +95,7 @@ export function newOrder(params: {
     passedBy: [],
     sellerAccountId: null,
     priceFen: null,
+    workTimeoutMs: null,
     purchaseUrl: null,
     paymentRef: null,
     deliveryAttempts: 0,
@@ -166,6 +169,7 @@ export function transition(order: Order, event: OrderEvent, now: Date): Transiti
         status: "ACCEPTED",
         sellerAccountId: event.sellerAccountId,
         priceFen: event.priceFen,
+        workTimeoutMs: event.workTimeoutMs ?? null,
         offeredTo: [],
         deadline: null,
       });
@@ -197,7 +201,7 @@ export function transition(order: Order, event: OrderEvent, now: Date): Transiti
     case "payment_confirmed": {
       if (s !== "AWAITING_PAYMENT") return reject(order, event);
       // The work clock starts at payment, so a seller who never starts still times out.
-      const work = capabilityTypes[order.capabilityType].workTimeoutMs;
+      const work = order.workTimeoutMs ?? capabilityTypes[order.capabilityType].workTimeoutMs;
       return ok({
         ...order,
         status: "PAID",
