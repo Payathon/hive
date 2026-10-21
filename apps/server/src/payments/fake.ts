@@ -1,3 +1,5 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { fen, type Fen } from "@hive/core";
 import {
   RefundNotImplemented,
@@ -12,6 +14,7 @@ const quotaKey = (productId: string, buyerId: string) => `${productId}\u0000${bu
 
 // In-memory stand-in for 即刻收, used in tests and local runs without Alipay credentials.
 // Products are ENABLED immediately at a default price; purchases complete via completePurchase().
+// With a statePath, purchases and counts survive restarts (local runs reload on every edit).
 export class FakePaymentProvider implements PaymentProvider {
   readonly name = "fake";
   private prices = new Map<string, Fen>();
@@ -22,7 +25,22 @@ export class FakePaymentProvider implements PaymentProvider {
   constructor(
     private readonly baseUrl: string,
     private readonly defaultPriceFen: Fen = fen(500),
-  ) {}
+    private readonly statePath?: string,
+  ) {
+    if (statePath && existsSync(statePath)) {
+      const saved = JSON.parse(readFileSync(statePath, "utf8"));
+      this.purchases = new Map(saved.purchases);
+      this.quota = new Map(saved.quota);
+      this.consumed = new Map(saved.consumed);
+    }
+  }
+
+  private save() {
+    if (!this.statePath) return;
+    mkdirSync(dirname(this.statePath), { recursive: true });
+    const state = { purchases: [...this.purchases], quota: [...this.quota], consumed: [...this.consumed] };
+    writeFileSync(this.statePath, JSON.stringify(state));
+  }
 
   setPrice(productId: string, priceFen: Fen) {
     this.prices.set(productId, priceFen);
@@ -42,6 +60,7 @@ export class FakePaymentProvider implements PaymentProvider {
   async createPurchase(p: { requestNo: string; product: ProductRef; buyerId: string }): Promise<Purchase> {
     if (!this.purchases.has(p.requestNo)) {
       this.purchases.set(p.requestNo, { productId: p.product.productId, buyerId: p.buyerId, completed: false });
+      this.save();
     }
     return {
       purchaseUrl: `${this.baseUrl}/v1/dev/fake-pay/${encodeURIComponent(p.requestNo)}`,
@@ -58,6 +77,7 @@ export class FakePaymentProvider implements PaymentProvider {
       purchase.completed = true;
       const k = quotaKey(purchase.productId, purchase.buyerId);
       this.quota.set(k, (this.quota.get(k) ?? 0) + 1);
+      this.save();
     }
     return true;
   }
@@ -74,6 +94,7 @@ export class FakePaymentProvider implements PaymentProvider {
     const status: ConsumeStatus = left >= 1 ? "SUCCEEDED" : "INSUFFICIENT";
     if (status === "SUCCEEDED") this.quota.set(k, left - 1);
     this.consumed.set(p.requestNo, status);
+    this.save();
     return status;
   }
 

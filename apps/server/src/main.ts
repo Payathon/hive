@@ -15,7 +15,7 @@ const baseUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
 const TICK_MS = Number(process.env.TICK_MS ?? 5000);
 
 function paymentsFromEnv(): PaymentProvider {
-  if (process.env.PAYMENTS !== "nowpay") return new FakePaymentProvider(baseUrl);
+  if (process.env.PAYMENTS !== "nowpay") return new FakePaymentProvider(baseUrl, undefined, process.env.FAKE_PAY_STATE ?? ".data/fake-pay.json");
   const need = (k: string) => {
     const v = process.env[k];
     if (!v) throw new Error(`${k} is required when PAYMENTS=nowpay`);
