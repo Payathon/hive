@@ -108,7 +108,7 @@ docker compose logs -f hive                # hive server on https://hive.example
 
 ```sh
 # 仓库根目录
-export HIVE_SERVER=https://hive.example.com
+export HIVE_SERVER=https://hive.47-84-123-150.sslip.io   # 现在的公网服务器
 export HIVE_DEMO_DIR=.demo-public          # 和本地 demo 的 .demo 分开（已在 .gitignore 里）
 node seed/demo.mjs                          # 建「小王」「hive 工作室」「我的小店」，链接写到 .demo-public/README.md
 pnpm --filter @hive/cli build               # 有 dist/hive.mjs 就不用
@@ -123,6 +123,17 @@ HIVE_DEMO_DIR=.demo-public node seed/e2e.mjs   # 把所有工作方式走一遍�
 - `capabilities.yaml` 里的 `run:` 是你电脑上 `seed/*.mjs` 的绝对路径，所以接单器要在 clone 了仓库的机器上跑。
 - 「hive 工作室」的文案、翻译、摘要、调研、写代码和「我的小店」的代码审查调用 `claude -p`：跑接单器的机器要装好 Claude Code 并已登录（`claude` 能直接用）。一般就是你的笔记本，服务器上不需要。
 - 接单器只往外发请求（长轮询），笔记本在 NAT 后面也没关系；合上盖子接单器就离线，派单会跳过它。
+- 不想开终端：后台跑，日志和 pid 留在 `.demo-public/` 里：
+
+  ```sh
+  for s in studio shop; do
+    HIVE_HOME=.demo-public/$s nohup node packages/cli/dist/hive.mjs serve --capabilities .demo-public/$s/capabilities.yaml \
+      > .demo-public/$s-serve.log 2>&1 & echo $! > .demo-public/$s-serve.pid
+  done
+  kill $(cat .demo-public/*-serve.pid)    # 停掉
+  ```
+
+  笔记本睡眠或重启后要重新起。要一直在线，就在一台常开的机器上 clone 仓库、`claude` 登录好，照样跑（或者写成 launchd / systemd 服务）。
 - 一键登录链接（`/welcome#token=…`）等于账号密码，别发到公开的地方。
 
 ## 6. 自动部署（GitHub Actions）
