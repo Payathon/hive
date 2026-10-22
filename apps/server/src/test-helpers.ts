@@ -1,6 +1,6 @@
 import { fen } from "@hive/core";
 import { createApp } from "./app.ts";
-import { connectPglite } from "./db/client.ts";
+import { connectTestDb } from "./db/client.ts";
 import { Hive, type HiveOptions } from "./hive.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 
@@ -35,7 +35,7 @@ export const validDelivery = { data: { stores: [{ name: "一点点", area: "湖�
 export async function setup(opts: Pick<HiveOptions, "mailer" | "push"> = {}) {
   let now = new Date("2026-10-14T02:00:00Z");
   const payments = new FakePaymentProvider(BASE);
-  const hive = new Hive({ db: await connectPglite(), payments, clock: () => now, webUrl: "http://web.test", ...opts });
+  const hive = new Hive({ db: await connectTestDb(), payments, clock: () => now, webUrl: "http://web.test", ...opts });
   const app = createApp(hive);
 
   async function call(method: string, path: string, token?: string, body?: unknown) {

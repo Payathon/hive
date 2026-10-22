@@ -118,7 +118,7 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
     const client = new HiveClient("http://hive.internal", key!, (url, init) => Promise.resolve(app.fetch(new Request(url, init))));
     const server = createMcpServer({
       client: async () => client,
-      publicUrl: new URL(c.req.url).origin,
+      publicUrl: publicUrl(c),
       unauthorizedHint: "The token was revoked; connect again by following /agent.md.",
     });
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });

@@ -15,6 +15,9 @@ import { NowPayDirectProvider, type DirectProduct } from "./payments/nowpay-dire
 import type { PaymentProvider } from "./payments/provider.ts";
 import { pushFromEnv } from "./push.ts";
 
+// An empty variable (KEY= in an env file) means unset, so `??` defaults below still apply.
+for (const [k, v] of Object.entries(process.env)) if (v === "") delete process.env[k];
+
 const port = Number(process.env.PORT ?? 8787);
 const baseUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
 const TICK_MS = Number(process.env.TICK_MS ?? 5000);

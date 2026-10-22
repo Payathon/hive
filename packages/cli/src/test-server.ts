@@ -2,7 +2,7 @@ import type { AddressInfo } from "node:net";
 import { serve, type ServerType } from "@hono/node-server";
 import { expect } from "vitest";
 import { createApp } from "@hive/server/app";
-import { connectPglite } from "@hive/server/db";
+import { connectTestDb } from "@hive/server/db";
 import { Hive } from "@hive/server/hive";
 import { FakePaymentProvider } from "@hive/server/payments/fake";
 import { HiveClient } from "@hive/client/api";
@@ -31,7 +31,7 @@ export const competitorOrder = {
 // A real HTTP server (PGlite + fake payments) so CLI code runs exactly as in production.
 export async function startTestServer() {
   const payments = new FakePaymentProvider("http://placeholder");
-  const hive = new Hive({ db: await connectPglite(), payments });
+  const hive = new Hive({ db: await connectTestDb(), payments });
   const app = createApp(hive);
   const server = await new Promise<ServerType>((resolve) => {
     const s = serve({ fetch: app.fetch, port: 0 }, () => resolve(s));
