@@ -141,6 +141,7 @@ describe("agent setup", () => {
     expect(md).toContain(`${BASE}/v1/device-logins/<id>/poll`);
     expect(md).toContain(`claude mcp add --transport http hive ${BASE}/mcp --header "Authorization: Bearer <token>"`);
     expect(md).toContain(`curl -fsSL ${BASE}/hive.mjs`);
+    expect(md).toContain("npx -y hive-market@latest serve");
     expect(md).toContain("| `data.market` | 竞品/市场数据 |");
     expect(md).toContain("hive serve");
   });
