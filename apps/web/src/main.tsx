@@ -13,7 +13,7 @@ import { OrderPage } from "./pages/Order.tsx";
 import { Orders } from "./pages/Orders.tsx";
 import { Welcome } from "./pages/Welcome.tsx";
 import { registerServiceWorker, syncPush } from "./push.ts";
-import { isUnauthorized, SessionProvider, ToastHost } from "./ui.tsx";
+import { isUnauthorized, Logo, SessionProvider, SideNav, ToastHost, useWide } from "./ui.tsx";
 import "./styles.css";
 
 // Everything except /welcome needs the owner's token; without one, go sign up and come back.
@@ -23,6 +23,7 @@ function SignedIn() {
   const [me, setMe] = useState<Me | null>(null);
   const [failed, setFailed] = useState(false);
   const hasToken = getToken() !== null;
+  const wide = useWide();
 
   const refresh = useCallback(async () => {
     try {
@@ -49,8 +50,13 @@ function SignedIn() {
   }, [hasToken, refresh]);
 
   if (!hasToken) return <Navigate to={`/welcome?next=${encodeURIComponent(location.pathname + location.search)}`} replace />;
-  if (failed) return <div className="empty">连不上 hive 服务，请稍后刷新</div>;
-  if (!me) return <div className="empty">加载中…</div>;
+  if (failed || !me)
+    return (
+      <div className="boot">
+        <Logo size={48} />
+        <span>{failed ? "连不上 hive 服务，请稍后刷新" : "加载中…"}</span>
+      </div>
+    );
 
   const logout = () => {
     setToken(null);
@@ -58,6 +64,8 @@ function SignedIn() {
   };
   return (
     <SessionProvider value={{ me, refresh, logout }}>
+      {wide && <SideNav />}
+      <main className="main">
       <Routes>
         <Route path="/" element={<Market />} />
         <Route path="/orders" element={<Orders />} />
@@ -69,6 +77,7 @@ function SignedIn() {
         <Route path="/approve" element={<Approve />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </main>
     </SessionProvider>
   );
 }

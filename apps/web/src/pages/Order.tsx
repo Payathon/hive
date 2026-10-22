@@ -1,4 +1,4 @@
-import { Fragment, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import { ApiError, hive, type OrderDetail } from "../api.ts";
 import {
@@ -16,7 +16,7 @@ import {
   VERDICT,
   yuan,
 } from "../format.ts";
-import { AgentIcon, NavBar, Timeline, TypeTile, useAction, useNow, usePoll, useSession, useToast } from "../ui.tsx";
+import { AgentIcon, NavBar, Skeleton, Timeline, TypeTile, useAction, useNow, usePoll, useSession, useToast, useWide } from "../ui.tsx";
 
 type Role = "buyer" | "seller";
 
@@ -150,6 +150,17 @@ function Deliverable({ o }: { o: OrderDetail }) {
   );
 }
 
+function Thumb({ file }: { file: File }) {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!file.type.startsWith("image/")) return;
+    const u = URL.createObjectURL(file);
+    setUrl(u);
+    return () => URL.revokeObjectURL(u);
+  }, [file]);
+  return url ? <img src={url} alt="" /> : <span className="file-ic">{file.name.split(".").pop()?.slice(0, 4).toUpperCase()}</span>;
+}
+
 // One way in for deliveries: the owner here, `hive serve`'s run command, or the owner's agent via hive_deliver.
 function DeliverForm({ o, onDone }: { o: OrderDetail; onDone: () => void }) {
   const { busy, run } = useAction();
@@ -189,13 +200,24 @@ function DeliverForm({ o, onDone }: { o: OrderDetail; onDone: () => void }) {
       <div className="inline-note"><AgentIcon small />也可以让你的 agent 交付：它用 hive 的 hive_deliver 工具，订单号 {o.id}</div>
       {spec.kind !== "json" && (
         <div className="field">
-          <label htmlFor="files">{camera ? "拍照或选照片" : "文件"}</label>
-          <input id="files" type="file" multiple accept={accept} {...(camera ? { capture: "environment" } : {})}
+          <span className="label">{camera ? "照片" : "文件"}</span>
+          <label className="drop" htmlFor="files">
+            <svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              {camera ? <path d="M4 8h3l2-2.5h6L17 8h3v11H4zM12 16.5a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" /> : <path d="M12 16V4M7 9l5-5 5 5M4 15v5h16v-5" />}
+            </svg>
+            <b>{camera ? "拍照或选照片" : "选择文件"}</b>
+            <small>{files.length ? `已选 ${files.length} 个，可以继续添加` : specText(spec)}</small>
+          </label>
+          <input id="files" className="visually-hidden" type="file" multiple accept={accept} {...(camera ? { capture: "environment" } : {})}
             onChange={(e) => setFiles([...files, ...Array.from(e.target.files ?? [])])} />
           {files.length > 0 && (
-            <div className="files">
+            <div className="files picked">
               {files.map((f, i) => (
-                <a key={i} href="#" onClick={(e) => (e.preventDefault(), setFiles(files.filter((_, j) => j !== i)))}>{f.name}<small>{fileSize(f.size)} · 移除</small></a>
+                <div className="file" key={i}>
+                  <Thumb file={f} />
+                  <span className="tx">{f.name}<small>{fileSize(f.size)}</small></span>
+                  <button type="button" className="link" onClick={() => setFiles(files.filter((_, j) => j !== i))}>移除</button>
+                </div>
               ))}
             </div>
           )}
@@ -212,7 +234,7 @@ function DeliverForm({ o, onDone }: { o: OrderDetail; onDone: () => void }) {
         <label htmlFor="note">给买家的说明</label>
         <textarea id="note" className="prose" value={note} onChange={(e) => setNote(e.target.value)} placeholder="交付了什么、有什么要注意的" />
       </div>
-      <button className="btn" type="submit" disabled={busy} style={{ marginTop: 12 }}>{busy ? "提交中…" : "提交交付"}</button>
+      <button className="btn" type="submit" disabled={busy}>{busy ? "提交中…" : "提交交付"}</button>
     </form>
   );
 }
@@ -223,6 +245,7 @@ export function OrderPage() {
   const toast = useToast();
   const now = useNow();
   const { busy, run } = useAction();
+  const wide = useWide();
   const [polling, setPolling] = useState(true);
 
   const { data: o, error, reload } = usePoll(
@@ -245,7 +268,7 @@ export function OrderPage() {
     return (
       <div className="page">
         <NavBar title="订单详情" />
-        <div className="empty">{missing ? "找不到这个订单" : error ? "加载失败，稍后自动重试" : "加载中…"}</div>
+        {missing || error ? <div className="empty">{missing ? "找不到这个订单" : "加载失败，稍后自动重试"}</div> : <Skeleton head rows={4} />}
       </div>
     );
   }
@@ -304,61 +327,93 @@ export function OrderPage() {
 
   const amount = o.priceFen === null ? "—" : `${o.status === "COMPLETED" ? (role === "buyer" ? "-" : "+") : ""}${yuan(o.priceFen)}`;
 
-  return (
-    <div className="page">
-      <NavBar title="订单详情" />
-      <div className="bill-head">
-        <TypeTile type={o.category} />
-        <div className="name">{typeTitle(o.category)}{o.sellerName ? ` · ${o.sellerName}` : ""}</div>
-        <div className="amt tnum">{amount}</div>
-        <div className={`status tone-${tone}`}>
-          {role === "seller" && o.status === "PAID" ? "可以开始了" : STATUS_LABEL[o.status]}
-          <small className="tnum">{statusLine(o, role, now)}</small>
-        </div>
+  const banner = o.createdByActor === "agent" && (
+    <div className="card agent-banner">
+      <AgentIcon />
+      <div>
+        {role === "buyer" ? "由你的 agent 发起" : "这单由买家的 agent 发起"}
+        <small>{role === "buyer" ? "agent 负责下单和验收，每笔付款都要你确认" : "付款由买家本人在支付宝确认"}</small>
       </div>
+    </div>
+  );
 
-      {o.createdByActor === "agent" && (
-        <div className="card agent-banner">
-          <AgentIcon />
-          <div>
-            {role === "buyer" ? "由你的 agent 发起" : "这单由买家的 agent 发起"}
-            <small>{role === "buyer" ? "agent 负责下单和验收，每笔付款都要你确认" : "付款由买家本人在支付宝确认"}</small>
-          </div>
-        </div>
-      )}
+  const details = (
+    <div className="card">
+      <h4>订单信息</h4>
+      <dl className="kv">
+        {inputRows(o).map(([k, v]) => (
+          <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>
+        ))}
+        {role === "buyer" && (
+          <>
+            <dt>卖家</dt>
+            <dd>
+              {o.sellerName ?? "派单中"}
+              {o.sellerName && o.sellerWorkMode && <span className={`tag${o.sellerWorkMode === "manual" ? " person" : ""}`}>{o.sellerWorkMode === "manual" ? "真人" : "agent"}</span>}
+            </dd>
+          </>
+        )}
+        <dt>付款方式</dt>
+        <dd>支付宝，钱直接给卖家</dd>
+        <dt>订单编号</dt>
+        <dd className="tnum mono">{o.id}</dd>
+        <dt>创建时间</dt>
+        <dd className="tnum">{dateTime(o.createdAt)}</dd>
+      </dl>
+    </div>
+  );
 
+  const head = (
+    <div className="bill-head">
+      <TypeTile type={o.category} size={48} />
+      <div className="name">{typeTitle(o.category)}{o.sellerName ? ` · ${o.sellerName}` : ""}</div>
+      <div className="amt tnum">{amount}</div>
+      <div className={`status tone-${tone}`}>
+        {role === "seller" && o.status === "PAID" ? "可以开始了" : STATUS_LABEL[o.status]}
+        <small className="tnum">{statusLine(o, role, now)}</small>
+      </div>
+    </div>
+  );
+
+  const work = (
+    <>
       {(o.status === "DELIVERED" || o.status === "COMPLETED") && <Deliverable o={o} />}
       {role === "seller" && (o.status === "PAID" || o.status === "IN_PROGRESS") && <DeliverForm o={o} onDone={() => void reload()} />}
-
       <div className="card">
         <h4>订单进度</h4>
         <Timeline steps={timeline(o, role)} />
       </div>
+    </>
+  );
 
-      <div className="card">
-        <dl className="kv">
-          {inputRows(o).map(([k, v]) => (
-            <Fragment key={k}><dt>{k}</dt><dd>{v}</dd></Fragment>
-          ))}
-          {role === "buyer" && (
-            <>
-              <dt>卖家</dt>
-              <dd>
-                {o.sellerName ?? "派单中"}
-                {o.sellerName && o.sellerWorkMode && <span className={`tag${o.sellerWorkMode === "manual" ? " person" : ""}`}>{o.sellerWorkMode === "manual" ? "真人" : "agent"}</span>}
-              </dd>
-            </>
-          )}
-          <dt>付款方式</dt>
-          <dd>支付宝，钱直接给卖家</dd>
-          <dt>订单编号</dt>
-          <dd className="tnum">{o.id}</dd>
-          <dt>创建时间</dt>
-          <dd className="tnum">{dateTime(o.createdAt)}</dd>
-        </dl>
+  // Phone: 支付宝账单 order, one column with the main button pinned to the bottom.
+  // Laptop: the work on the left; who started it, the details and the buttons on the right.
+  if (!wide) {
+    return (
+      <div className="page order">
+        <NavBar title="订单详情" />
+        {head}
+        {banner}
+        {work}
+        {details}
+        {actions && <div className="actionbar">{actions}</div>}
       </div>
-
-      {actions && <div className="actionbar">{actions}</div>}
+    );
+  }
+  return (
+    <div className="page order">
+      <NavBar title="订单详情" />
+      <div className="cols">
+        <div className="col main-col">
+          <div className="card head-card">{head}</div>
+          {work}
+        </div>
+        <div className="col side-col">
+          {actions && <div className="card action-panel">{actions}</div>}
+          {banner}
+          {details}
+        </div>
+      </div>
     </div>
   );
 }

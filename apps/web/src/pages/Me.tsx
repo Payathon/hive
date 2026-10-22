@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { hive, type AgentGrant } from "../api.ts";
 import { shortDate, typeTitle, yuan } from "../format.ts";
 import { disablePush, enablePush, pushState, type PushState } from "../push.ts";
-import { AgentIcon, Bell, Switch, TabBar, useAction, usePoll, useSession, useToast } from "../ui.tsx";
+import { AgentIcon, Bell, LargeTitle, Switch, TabBar, TypeTile, useAction, usePoll, useSession, useToast } from "../ui.tsx";
 
 const toFen = (s: string) => (s.trim() === "" ? null : Math.round(Number(s) * 100));
 const toYuan = (fen: number | null) => (fen === null ? "" : String(fen / 100));
@@ -36,7 +36,7 @@ function Rules() {
         <div className="tx"><b>暂停下单</b><small>打开后，你和 agent 都不能再下新订单</small></div>
         <Switch on={me.rules.paused} onChange={pause} label="暂停下单" disabled={busy} />
       </div>
-      <div className="field" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+      <div className="field">
         <label htmlFor="per">单笔上限（元，不填不限）</label>
         <input id="per" type="number" min={0} step="0.01" inputMode="decimal" value={perOrder} onChange={(e) => setPerOrder(e.target.value)} />
       </div>
@@ -97,7 +97,7 @@ function Notify() {
         </div>
         <Switch on={push === "on"} onChange={toggle} label="开启通知" disabled={busy || !push || push === "unsupported" || push === "unavailable" || push === "denied"} />
       </div>
-      <div className="field" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+      <div className="field">
         <label htmlFor="email">邮件通知（不填就不发）</label>
         <input id="email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
       </div>
@@ -167,7 +167,7 @@ function ApiKey({ onCreated }: { onCreated: () => Promise<void> }) {
 
   if (!key) {
     return (
-      <button className="link" type="button" disabled={busy} onClick={makeKey} style={{ alignSelf: "center" }}>
+      <button className="link center" type="button" disabled={busy} onClick={makeKey}>
         给 Cursor 等 MCP 客户端生成 API key
       </button>
     );
@@ -187,45 +187,54 @@ export function MePage() {
   const { me, logout } = useSession();
   const { data: bill } = usePoll(() => hive.bill(), 15_000);
   const { data: grants, reload: reloadGrants } = usePoll(() => hive.agents(), 0);
+  const entries = [...(bill?.spent.map((e) => ({ ...e, sign: "-" })) ?? []), ...(bill?.earned.map((e) => ({ ...e, sign: "+" })) ?? [])]
+    .sort((a, b) => (b.paidAt ?? "").localeCompare(a.paidAt ?? ""))
+    .slice(0, 20);
 
   return (
     <>
-      <div className="page">
-        <div className="bill-head" style={{ paddingTop: "calc(24px + env(safe-area-inset-top, 0px))" }}>
-          <Bell corner />
-          <span className="type-tile" style={{ background: "var(--blue)", borderRadius: "50%", fontSize: 18 }}>{me.name.slice(0, 1)}</span>
-          <div className="amt" style={{ fontSize: 22 }}>{me.name}</div>
-          <div className="status tone-mute"><small className="tnum">{me.id}</small></div>
-        </div>
+      <div className="page me">
+        <LargeTitle title="我的" right={<Bell />} />
+        <div className="cols">
+          <div className="col main-col">
+            <div className="card profile">
+              <span className="av">{me.name.slice(0, 1)}</span>
+              <div className="tx">
+                <b>{me.name}</b>
+                <small className="tnum mono">{me.id}</small>
+              </div>
+            </div>
 
-        <div className="card">
-          <h4><span>账单</span><small>只记已付款的订单</small></h4>
-          <div className="stats" style={{ marginBottom: bill?.spent.length || bill?.earned.length ? 12 : 0 }}>
-            <div><b className="tnum">{yuan(bill?.spentFen ?? 0)}</b><span>支出（元）</span></div>
-            <div><b className="tnum">{yuan(bill?.earnedFen ?? 0)}</b><span>收入（元）</span></div>
-            <div><b className="tnum">{(bill?.spent.filter((e) => e.createdByActor === "agent").length ?? 0)}</b><span>agent 发起</span></div>
+            <div className="card">
+              <h4><span>账单</span><small>只记已付款的订单</small></h4>
+              <div className="stats boxed">
+                <div><b className="tnum">{yuan(bill?.spentFen ?? 0)}</b><span>支出（元）</span></div>
+                <div><b className="tnum">{yuan(bill?.earnedFen ?? 0)}</b><span>收入（元）</span></div>
+                <div><b className="tnum">{(bill?.spent.filter((e) => e.createdByActor === "agent").length ?? 0)}</b><span>agent 发起</span></div>
+              </div>
+              {bill && entries.length === 0 && <p className="hint-line">还没有付过款的订单</p>}
+              {entries.map((e) => (
+                <Link className="list-row" key={e.orderId + e.sign} to={`/orders/${e.orderId}`}>
+                  <TypeTile type={e.category} size={36} />
+                  <div className="tx">
+                    <b>{typeTitle(e.category)}</b>
+                    <small>{e.sign === "-" && e.createdByActor === "agent" ? "由 agent 发起，你确认 · " : ""}{e.paidAt ? shortDate(e.paidAt) : ""}</small>
+                  </div>
+                  <div className="r"><b className="tnum" style={{ color: e.sign === "+" ? "var(--ok)" : "var(--ink)" }}>{e.sign}{yuan(e.priceFen)}</b></div>
+                </Link>
+              ))}
+            </div>
           </div>
-          {[...(bill?.spent.map((e) => ({ ...e, sign: "-" })) ?? []), ...(bill?.earned.map((e) => ({ ...e, sign: "+" })) ?? [])]
-            .sort((a, b) => (b.paidAt ?? "").localeCompare(a.paidAt ?? ""))
-            .slice(0, 20)
-            .map((e) => (
-              <Link className="list-row" key={e.orderId + e.sign} to={`/orders/${e.orderId}`}>
-                <div className="tx">
-                  <b>{typeTitle(e.category)}</b>
-                  <small>{e.sign === "-" && e.createdByActor === "agent" ? "由 agent 发起，你确认 · " : ""}{e.paidAt ? shortDate(e.paidAt) : ""}</small>
-                </div>
-                <div className="r"><b className="tnum" style={{ color: e.sign === "+" ? "var(--ok)" : "var(--ink)" }}>{e.sign}{yuan(e.priceFen)}</b></div>
-              </Link>
-            ))}
+          <div className="col side-col">
+            <Notify />
+            <Rules />
+            <Agents grants={grants ?? []} reload={reloadGrants} />
+            <div className="card flush">
+              <button className="cell-btn danger" type="button" onClick={logout}>退出登录</button>
+            </div>
+            <ApiKey onCreated={reloadGrants} />
+          </div>
         </div>
-
-        <Notify />
-        <Rules />
-        <Agents grants={grants ?? []} reload={reloadGrants} />
-        <div className="card" style={{ padding: 0 }}>
-          <button className="btn line" type="button" style={{ border: 0 }} onClick={logout}>退出登录</button>
-        </div>
-        <ApiKey onCreated={reloadGrants} />
       </div>
       <TabBar />
     </>

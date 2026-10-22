@@ -105,15 +105,62 @@ export function useNow(ms = 1000) {
 
 export const isUnauthorized = (err: unknown) => err instanceof ApiError && err.status === 401;
 
+// ---- layout -----------------------------------------------------------
+
+// Laptop layout (left sidebar, wider columns) from this width up. Matches the 900px breakpoint in styles.css.
+const WIDE = "(min-width: 900px)";
+export function useWide() {
+  const [wide, setWide] = useState(() => typeof matchMedia !== "undefined" && matchMedia(WIDE).matches);
+  useEffect(() => {
+    const mq = matchMedia(WIDE);
+    const on = () => setWide(mq.matches);
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, []);
+  return wide;
+}
+
 // ---- chrome -----------------------------------------------------------
 
+const Chevron = () => (
+  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M15 5l-7 7 7 7" />
+  </svg>
+);
+
+// Detail pages: a centered-title bar with a back button on the phone, a left-aligned page title on a laptop.
 export function NavBar({ title, right, wide }: { title: string; right?: ReactNode; wide?: boolean }) {
   const navigate = useNavigate();
   return (
     <header className={`navbar${wide ? " wide" : ""}`}>
-      <button type="button" aria-label="返回" onClick={() => (history.length > 1 ? navigate(-1) : navigate("/"))}>‹</button>
+      <button type="button" className="back" aria-label="返回" onClick={() => (history.length > 1 ? navigate(-1) : navigate("/"))}><Chevron /></button>
       <b>{title}</b>
-      <span>{right}</span>
+      <span className="nav-r">{right}</span>
+    </header>
+  );
+}
+
+// Tab pages: an iOS large title that hands over to a small frosted bar once it scrolls away.
+export function LargeTitle({ title, sub, right }: { title: string; sub?: ReactNode; right?: ReactNode }) {
+  const ref = useRef<HTMLHeadingElement>(null);
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => setCollapsed(!e!.isIntersecting), { rootMargin: "-44px 0px 0px 0px" });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return (
+    <header className="lt">
+      <div className={`lt-bar${collapsed ? " show" : ""}`} aria-hidden="true"><b>{title}</b></div>
+      <div className="lt-big">
+        <div className="lt-tx">
+          <h1 ref={ref}>{title}</h1>
+          {sub && <p>{sub}</p>}
+        </div>
+        {right}
+      </div>
     </header>
   );
 }
@@ -123,6 +170,7 @@ const icons = {
   orders: <path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6" />,
   desk: <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 4v5l3 2" />,
   me: <path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zm-7 9a7 7 0 0 1 14 0" />,
+  inbox: <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" />,
 };
 function TabIcon({ name }: { name: keyof typeof icons }) {
   return (
@@ -132,42 +180,120 @@ function TabIcon({ name }: { name: keyof typeof icons }) {
   );
 }
 
-// The 订单 tab shows how many orders wait for the owner (to pay or to accept a delivery).
+// Orders that wait for the owner (to pay or to accept a delivery), and unread notifications.
+const useWaiting = () =>
+  usePoll(async () => (await hive.orders("buyer")).filter((o) => o.status === "AWAITING_PAYMENT" || o.status === "DELIVERED").length, 15_000).data ?? 0;
+const useUnread = () => usePoll(async () => (await hive.notifications()).filter((n) => !n.readAt).length, 5000).data ?? 0;
+const badgeText = (n: number) => (n > 99 ? "99+" : String(n));
+
+const TABS: Array<[keyof typeof icons, string, string]> = [
+  ["market", "/", "市场"],
+  ["orders", "/orders", "订单"],
+  ["desk", "/desk", "接单"],
+  ["me", "/me", "我的"],
+];
+
+// Phone: the four bottom tabs. On a laptop the sidebar replaces them.
 export function TabBar() {
-  const { data: waiting } = usePoll(
-    async () => (await hive.orders("buyer")).filter((o) => o.status === "AWAITING_PAYMENT" || o.status === "DELIVERED").length,
-    15_000,
-  );
-  const badges: Partial<Record<keyof typeof icons, number>> = { orders: waiting ?? 0 };
-  const tabs: Array<[keyof typeof icons, string, string]> = [
-    ["market", "/", "市场"],
-    ["orders", "/orders", "订单"],
-    ["desk", "/desk", "接单"],
-    ["me", "/me", "我的"],
-  ];
+  const wide = useWide();
+  return wide ? null : <PhoneTabs />;
+}
+function PhoneTabs() {
+  const waiting = useWaiting();
   return (
-    <nav className="tabbar">
-      {tabs.map(([k, to, label]) => (
+    <nav className="tabbar" aria-label="主导航">
+      {TABS.map(([k, to, label]) => (
         <NavLink key={k} to={to} end={to === "/"}>
           <TabIcon name={k} />
           {label}
-          {badges[k] ? <span className="badge">{badges[k]}</span> : null}
+          {k === "orders" && waiting ? <span className="badge">{badgeText(waiting)}</span> : null}
         </NavLink>
       ))}
     </nav>
   );
 }
 
-// The 消息 bell: unread notifications for this account, polled like the rest of the app.
-export function Bell({ corner }: { corner?: boolean }) {
-  const { data: unread } = usePoll(async () => (await hive.notifications()).filter((n) => !n.readAt).length, 5000);
+// Laptop: a fixed left sidebar with the same four places plus 消息.
+export function SideNav() {
+  const { me } = useSession();
+  const waiting = useWaiting();
+  const unread = useUnread();
+  const items: Array<[keyof typeof icons, string, string, number]> = [
+    ...TABS.map(([k, to, label]) => [k, to, label, k === "orders" ? waiting : 0] as [keyof typeof icons, string, string, number]),
+    ["inbox", "/inbox", "消息", unread],
+  ];
   return (
-    <Link to="/inbox" className={`bell${corner ? " corner" : ""}`} aria-label={unread ? `消息，${unread} 条未读` : "消息"}>
+    <nav className="sidenav" aria-label="主导航">
+      <Link to="/" className="brand"><Logo size={32} /><b>hive</b></Link>
+      <div className="side-items">
+        {items.map(([k, to, label, n]) => (
+          <NavLink key={k} to={to} end={to === "/"}>
+            <TabIcon name={k} />
+            <span>{label}</span>
+            {n ? <span className="badge">{badgeText(n)}</span> : null}
+          </NavLink>
+        ))}
+      </div>
+      <Link to="/me" className="side-me">
+        <span className="av">{me.name.slice(0, 1)}</span>
+        <span className="tx"><b>{me.name}</b><small>每笔付款都由你确认</small></span>
+      </Link>
+    </nav>
+  );
+}
+
+export function Logo({ size = 56 }: { size?: number }) {
+  return (
+    <svg className="logo" width={size} height={size} viewBox="0 0 512 512" aria-hidden="true">
+      <rect width="512" height="512" rx="112" fill="#1677ff" />
+      <path d="M256 112l124 72v144l-124 72-124-72V184z" fill="none" stroke="#fff" strokeWidth="36" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+// The 消息 bell on phone headers. On a laptop 消息 lives in the sidebar.
+export function Bell() {
+  const wide = useWide();
+  return wide ? null : <PhoneBell />;
+}
+function PhoneBell() {
+  const unread = useUnread();
+  return (
+    <Link to="/inbox" className="bell" aria-label={unread ? `消息，${unread} 条未读` : "消息"}>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-        <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" />
+        {icons.inbox}
       </svg>
-      {unread ? <span className="badge">{unread > 99 ? "99+" : unread}</span> : null}
+      {unread ? <span className="badge">{badgeText(unread)}</span> : null}
     </Link>
+  );
+}
+
+// ---- states -----------------------------------------------------------
+
+export function Skeleton({ rows = 3, head }: { rows?: number; head?: boolean }) {
+  return (
+    <div className="card skel-card" aria-busy="true" aria-label="加载中">
+      {head && <i className="skel" style={{ width: "40%", height: 16, marginBottom: 14 }} />}
+      {Array.from({ length: rows }, (_, i) => (
+        <div className="skel-row" key={i}>
+          <i className="skel" style={{ width: 40, height: 40, borderRadius: 10 }} />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+            <i className="skel" style={{ width: `${55 + ((i * 17) % 30)}%`, height: 14 }} />
+            <i className="skel" style={{ width: `${35 + ((i * 23) % 30)}%`, height: 11 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function Empty({ icon = "orders", title, children }: { icon?: keyof typeof icons; title: string; children?: ReactNode }) {
+  return (
+    <div className="empty">
+      <span className="empty-ic"><TabIcon name={icon} /></span>
+      <b>{title}</b>
+      {children && <div className="empty-sub">{children}</div>}
+    </div>
   );
 }
 

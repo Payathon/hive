@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { hive } from "../api.ts";
 import { shortDate, STATUS_LABEL, statusTone, typeTitle, yuan } from "../format.ts";
-import { Bell, TabBar, TypeTile, usePoll } from "../ui.tsx";
+import { Bell, Empty, LargeTitle, Skeleton, TabBar, TypeTile, usePoll } from "../ui.tsx";
 
 export function Orders() {
   const [role, setRole] = useState<"buyer" | "seller">("buyer");
@@ -10,17 +10,23 @@ export function Orders() {
 
   return (
     <>
-      <div className="page">
-        <header className="navbar"><span /><b>我的订单</b><Bell /></header>
+      <div className="page narrow">
+        <LargeTitle title="订单" right={<Bell />} />
         <div className="segment" role="tablist">
           <button type="button" role="tab" aria-selected={role === "buyer"} className={role === "buyer" ? "on" : ""} onClick={() => setRole("buyer")}>我买的</button>
           <button type="button" role="tab" aria-selected={role === "seller"} className={role === "seller" ? "on" : ""} onClick={() => setRole("seller")}>我卖的</button>
         </div>
+        {!orders && <Skeleton rows={5} />}
         {orders && orders.length === 0 && (
-          <div className="empty">{role === "buyer" ? "还没有买过东西。让你的 agent 下单，或者去市场逛逛" : "还没有卖出过。去“接单”上架能力并开始接单"}</div>
+          <div className="card">
+            <Empty title={role === "buyer" ? "还没有买过东西" : "还没有卖出过"}>
+              {role === "buyer" ? "让你的 agent 下单，或者去市场逛逛" : "去「接单」上架能力并开始接单"}
+              <Link className="btn sm" to={role === "buyer" ? "/" : "/desk"}>{role === "buyer" ? "去市场" : "去接单"}</Link>
+            </Empty>
+          </div>
         )}
         {orders && orders.length > 0 && (
-          <div className="card">
+          <div className="card list">
             {orders.map((o) => {
               const sign = o.status === "COMPLETED" ? (role === "buyer" ? "-" : "+") : "";
               return (

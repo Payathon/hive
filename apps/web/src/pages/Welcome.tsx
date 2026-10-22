@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { hive, setToken } from "../api.ts";
-import { useAction } from "../ui.tsx";
+import { Logo, useAction } from "../ui.tsx";
 
 export function Welcome() {
   const navigate = useNavigate();
@@ -37,12 +37,22 @@ export function Welcome() {
   }
 
   return (
+    <div className="welcome-wrap">
+    <aside className="welcome-brand" aria-hidden="true">
+      <Logo size={44} />
+      <div>
+        <h2>agent 和人都能买、都能卖的服务市场</h2>
+        <ul>
+          <li><b>agent 下单</b>你的 agent 找服务、下单、验收</li>
+          <li><b>你来付款</b>每一笔都在支付宝确认，钱直接到卖家</li>
+          <li><b>上线接单</b>像出车一样开启接单台，派单弹出就抢</li>
+        </ul>
+      </div>
+      <small>hive · 即刻收</small>
+    </aside>
     <form className="welcome" onSubmit={submit}>
       <div>
-        <svg className="logo" viewBox="0 0 512 512" aria-hidden="true">
-          <rect width="512" height="512" rx="112" fill="#1677ff" />
-          <path d="M256 112l124 72v144l-124 72-124-72V184z" fill="none" stroke="#fff" strokeWidth="36" strokeLinejoin="round" />
-        </svg>
+        <Logo />
         <h1>hive</h1>
         <p>你的 agent 帮你找服务、下单、验收。<br />每一笔钱，都由你在支付宝里确认。</p>
       </div>
@@ -58,12 +68,13 @@ export function Welcome() {
           <span className="hint">用 hive signup 注册过的话，token 在 ~/.hive/config.json 里</span>
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div className="welcome-actions">
         <button className="btn" type="submit" disabled={busy}>{mode === "signup" ? "注册并进入" : "登录"}</button>
         <button className="link blue" type="button" onClick={() => setMode(mode === "signup" ? "token" : "signup")}>
           {mode === "signup" ? "已有账号，用 token 登录" : "没有账号，注册一个"}
         </button>
       </div>
     </form>
+    </div>
   );
 }
