@@ -1,4 +1,8 @@
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { createApp } from "./app.ts";
 import { BASE, DATA, orders, PHOTO, setup, validDelivery } from "./test-helpers.ts";
 
 describe("accounts and auth", () => {
@@ -97,6 +101,21 @@ describe("remote MCP", () => {
     expect((await rpc(t.app, alice.token, "tools/list")).status).toBe(403);
   });
 
+  it("takes the agent token from a device login, as /agent.md sets it up", async () => {
+    const t = await setup();
+    const alice = await t.account("alice");
+    const token = await t.agentToken(alice.token);
+    const cats = await (await rpc(t.app, token, "tools/call", { name: "hive_categories", arguments: {} })).json();
+    expect(cats.result.isError).toBeFalsy();
+    expect(cats.result.content[0].text).toContain("data.market");
+    const me = await (await rpc(t.app, token, "tools/call", { name: "hive_whoami", arguments: {} })).json();
+    expect(JSON.parse(me.result.content[0].text)).toMatchObject({ name: "alice", actor: "agent" });
+    // Revoking it on 我的 cuts the MCP off too.
+    const [grant] = await t.ok("GET", "/v1/agents", alice.token);
+    await t.ok("POST", `/v1/agents/${grant.id}/revoke`, alice.token);
+    expect((await rpc(t.app, token, "tools/list")).status).toBe(401);
+  });
+
   it("serves the buying tools with the caller's key, without a login tool", async () => {
     const t = await setup();
     const alice = await t.account("alice");
@@ -108,6 +127,51 @@ describe("remote MCP", () => {
     expect(names).not.toContain("hive_login");
     const me = await (await rpc(t.app, key, "tools/call", { name: "hive_whoami", arguments: {} })).json();
     expect(JSON.parse(me.result.content[0].text)).toMatchObject({ name: "alice", actor: "agent" });
+  });
+});
+
+describe("agent setup", () => {
+  it("serves /agent.md without auth, with this server's URLs and the category ids", async () => {
+    const t = await setup();
+    const res = await t.app.request(`${BASE}/agent.md`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/markdown");
+    const md = await res.text();
+    expect(md).toContain(`curl -s -X POST ${BASE}/v1/device-logins`);
+    expect(md).toContain(`${BASE}/v1/device-logins/<id>/poll`);
+    expect(md).toContain(`claude mcp add --transport http hive ${BASE}/mcp --header "Authorization: Bearer <token>"`);
+    expect(md).toContain(`curl -fsSL ${BASE}/hive.mjs`);
+    expect(md).toContain("| `data.market` | 竞品/市场数据 |");
+    expect(md).toContain("hive serve");
+  });
+
+  it("uses the public URL when one is configured, and offers the guide as a skill", async () => {
+    const t = await setup();
+    const app = createApp(t.hive, { publicUrl: "https://hive.example/" });
+    const md = await (await app.request(`${BASE}/agent.md`)).text();
+    expect(md).toContain("https://hive.example/mcp");
+    expect(md).not.toContain(BASE);
+    const skill = await (await app.request(`${BASE}/skill/hive/SKILL.md`)).text();
+    expect(skill).toMatch(/^---\nname: hive\ndescription: .+\n---\n\n# Connect to hive/);
+  });
+
+  it("serves the CLI bundle for agents that sell, when it is built", async () => {
+    const t = await setup();
+    expect((await t.app.request(`${BASE}/hive.mjs`)).status).toBe(404);
+    const dir = await mkdtemp(join(tmpdir(), "hive-cli-"));
+    await writeFile(join(dir, "hive.mjs"), "#!/usr/bin/env node\nconsole.log('hive')\n");
+    const app = createApp(t.hive, { cliBundle: join(dir, "hive.mjs") });
+    const res = await app.request(`${BASE}/hive.mjs`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("console.log('hive')");
+  });
+
+  it("tells the owner whether their listener is online", async () => {
+    const t = await setup();
+    const seller = await t.agentSeller("studio", DATA);
+    expect((await t.ok("GET", "/v1/me", seller.token)).listenerOnline).toBe(true);
+    t.advance(2 * 60_000);
+    expect((await t.ok("GET", "/v1/me", seller.token)).listenerOnline).toBe(false);
   });
 });
 

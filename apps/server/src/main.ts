@@ -1,4 +1,6 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
@@ -67,7 +69,17 @@ const mailer = mailerFromEnv(db);
 const push = pushFromEnv(process.env.VAPID_FILE ?? ".data/vapid.json");
 const payments = paymentsFromEnv();
 const hive = new Hive({ db, payments, files, mailer, push, webUrl: webUrl ?? baseUrl });
-const app = createApp(hive, webUrl ? { webUrl } : {});
+// The CLI bundle agents download from /hive.mjs. In the repo, build it on first start if it's missing.
+const cliBundle = process.env.HIVE_CLI_BUNDLE ?? fileURLToPath(new URL("../../../packages/cli/dist/hive.mjs", import.meta.url));
+if (!existsSync(cliBundle) && !process.env.HIVE_CLI_BUNDLE) {
+  const cliDir = fileURLToPath(new URL("../../../packages/cli", import.meta.url));
+  if (existsSync(`${cliDir}/build.mjs`)) spawnSync(process.execPath, ["build.mjs"], { cwd: cliDir, stdio: "inherit" });
+}
+const app = createApp(hive, {
+  ...(webUrl ? { webUrl } : {}),
+  ...(process.env.PUBLIC_URL ? { publicUrl: process.env.PUBLIC_URL } : {}),
+  cliBundle,
+});
 
 // Serves the built web app (apps/web) from the same origin when it has been built.
 const webDist = process.env.WEB_DIST ?? "../web/dist";
@@ -76,7 +88,7 @@ if (existsSync(webDist)) {
   site.use("*", serveStatic({ root: webDist }));
   // Client-side routes get the app shell; API paths keep their 404s.
   site.get("*", (c, next) =>
-    c.req.path.startsWith("/v1/") || c.req.path === "/mcp" ? next() : serveStatic({ root: webDist, path: "index.html" })(c, next),
+    c.req.path.startsWith("/v1/") || ["/mcp", "/agent.md", "/hive.mjs"].includes(c.req.path) ? next() : serveStatic({ root: webDist, path: "index.html" })(c, next),
   );
 }
 

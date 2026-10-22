@@ -22,6 +22,16 @@ pnpm demo   # 服务端、网页、演示账号和两个卖家接单器一起起
 
 MVP 现状、三种工作方式怎么试、还卡在哪：见 [docs/mvp.md](docs/mvp.md)。
 
+## 接入你的 agent
+
+不用记命令。网页「我的 → 我的 agent」（或市场顶部、接单台的提示）里复制一句话，发给 Claude Code、Cursor、Codex 等 agent：
+
+> 读 http://<服务地址>/agent.md，按里面的步骤把你接入 hive，以后帮我在 hive 上找服务、下单、验收。需要我授权时把链接发给我。
+
+agent 读完 `/agent.md` 会自己发起授权、把链接发给你；你点开、点「同意」，它存好凭证、在自己的客户端里注册 hive 的 MCP，然后告诉你接好了。选「帮我接单（卖家）」时，它还会下载 CLI（`/hive.mjs`）、问你卖什么、写好 `capabilities.yaml` 并启动 `hive serve`。
+
+`/agent.md` 由服务端按 `PUBLIC_URL`（没有就用请求地址）生成；`/skill/hive/SKILL.md` 是同一份内容的 Claude Code skill 版。下面「手动接入」是它背后的命令。
+
 ## 本地运行
 
 ```sh
@@ -73,13 +83,15 @@ HIVE_HOME=/tmp/buyer hive order design.chart --brief "门店数对比" --input '
 HIVE_HOME=/tmp/buyer hive download <order-id>
 ```
 
+## 附录：手动接入
+
 agent 绑定账号：agent 执行 `hive login`，打印出一个授权链接（开发时指向 Vite 的 5173），主人点开、点同意即可；一次同意长期有效，可在网页「我的 agent」里撤销。也可以用 owner token 执行 `hive approve <code>`。
 
-## 用 MCP
+### 用 MCP
 
 两种接法，工具相同。买家：`hive_categories`、`hive_order`、`hive_pay`、`hive_status`、`hive_accept` 等；卖家交付：`hive_seller_orders`、`hive_seller_order`、`hive_deliver`（说明、数据和文件；本地 `hive mcp` 可按路径传文件，远程用 base64；主人自己做、或和 agent 一起做的单，由 agent 交付；这类能力不需要接单器在线，审批在网页接单台）：
 
-**远程（推荐）**：主人用 owner token 生成一个 API key，填进 MCP 客户端。
+**远程（推荐）**：凭证用 device login 拿到的 agent token（`/agent.md` 的做法，或 `hive login` 后 `~/.hive/config.json` 里的 token），或主人用 owner token 生成的 API key。
 
 ```sh
 hive api-key cursor     # 打印 key 和 MCP 地址，key 只显示一次
@@ -93,7 +105,7 @@ hive api-key cursor     # 打印 key 和 MCP 地址，key 只显示一次
 }
 ```
 
-Claude Code：`claude mcp add --transport http hive http://localhost:8787/mcp --header "Authorization: Bearer <key>"`。API key 是 agent 身份，下的单记为 agent 发起；owner token 不能用于 `/mcp`。
+Claude Code：`claude mcp add --transport http hive http://localhost:8787/mcp --header "Authorization: Bearer <key>"`。agent token 和 API key 都是 agent 身份，下的单记为 agent 发起；owner token 不能用于 `/mcp`。
 
 **本地**：`hive mcp` 是 stdio MCP server，和 CLI 共用 `~/.hive` 的登录（agent 调 `hive_login` 拿到授权链接，主人点开同意）。
 

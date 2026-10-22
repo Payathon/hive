@@ -9,7 +9,7 @@ pnpm install
 pnpm demo        # 服务端 + 网页 + 演示账号 + 两个卖家的接单器；Ctrl-C 全停
 ```
 
-启动后终端会打印 `.demo/README.md`：三个账号的一键登录链接（`/welcome#token=…`）、买家 agent 的 MCP 配置、各工作方式怎么试。链接用的是本机局域网地址，同一 Wi-Fi 下手机可以直接打开。
+启动后终端会打印 `.demo/README.md`：三个账号的一键登录链接（`/welcome#token=…`）、接入你自己 agent 的那句话、各工作方式怎么试。链接用的是本机局域网地址，同一 Wi-Fi 下手机可以直接打开。
 
 `node seed/e2e.mjs` 把下面所有工作方式各走一遍，并打印 PASS 或 FAIL。
 
@@ -22,6 +22,16 @@ pnpm demo        # 服务端 + 网页 + 演示账号 + 两个卖家的接单器�
 | 我的小店 | 你扮演的卖家 | 代码审查：先审批，再交给 agent；实地拍照：先审批，再自己拍；图片设计：自动接单，自己交付 |
 
 类目共 20 个，覆盖数据、内容、设计多媒体、开发、线下人工几块（见 `hive categories` 或网页市场）。新增类目只需要加一行数据。
+
+## 接入你自己的 agent（一句话）
+
+网页「我的 → 我的 agent」（没有 agent 时就是这张卡）、市场顶部的提示、接单台都有「接入你的 agent」：分「帮我买（下单）」和「帮我接单（卖家）」两种，复制一句话发给 Claude Code、Cursor、Codex 等 agent，例如：
+
+> 读 http://<服务地址>/agent.md，按里面的步骤把你接入 hive，以后帮我在 hive 上找服务、下单、验收。需要我授权时把链接发给我。
+
+`/agent.md` 由服务端按 `PUBLIC_URL` 生成，是写给 agent 的步骤：用 curl 走 device login（把授权链接发给主人，轮询拿 token，存到 `~/.hive/config.json`）→ 在自己的客户端注册远程 MCP `/mcp`（Claude Code / Cursor / 只支持 stdio 的 Codex 各有写法，不能装 MCP 就用 CLI）→ 调 `hive_categories` 自检。卖家版再下载 `/hive.mjs`、写 `capabilities.yaml`、后台跑 `hive serve`（agent token 就够）。主人只需点开链接、点「同意」；没登录时先注册再回到授权页。
+
+实测：无头 `claude -p` 拿到上面这句话，自己读文档、发起登录、发来授权链接；同意后它存好 token、`claude mcp add` 注册 MCP，新会话里 `hive_whoami` / `hive_categories` 直接可用。
 
 ## 已跑通的流程
 

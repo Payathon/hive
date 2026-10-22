@@ -341,8 +341,31 @@ form.card > .btn, .card > .btn { margin-top: 12px; }
 .stats.boxed { background: var(--fill); border-radius: var(--r); padding: 12px 0; margin-bottom: 6px; }
 .add-btn { display: flex; align-items: center; justify-content: center; gap: 6px; width: 100%; min-height: 44px; margin-top: 12px; border: 1.5px dashed #c9d6ea; border-radius: var(--r); background: none; color: var(--blue); font-size: 14.5px; font-weight: 500; }
 @media (hover: hover) { .add-btn:hover { background: var(--blue-soft); border-color: var(--blue); } }
+
+/* ---------- 接入你的 agent: a prompt to paste into the agent ---------- */
+.connect { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.connect .segment { margin: 0; max-width: none; }
+.connect .segment button { font-size: 13px; }
+.prompt-box { display: flex; flex-direction: column; gap: 10px; background: var(--blue-soft); border-radius: var(--r); padding: 12px; }
+.prompt-box p { margin: 0; font-size: 14px; line-height: 1.65; color: var(--ink); overflow-wrap: anywhere; user-select: all; -webkit-user-select: all; }
+.prompt-box .btn { align-self: flex-end; min-width: 76px; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.steps li { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 12.5px; line-height: 1.45; color: var(--ink-2); }
+.steps .n { width: 22px; height: 22px; border-radius: 50%; background: var(--blue); color: #fff; display: grid; place-items: center; font-size: 12px; font-weight: 600; }
+.connect-foot { margin: 0; font-size: 12px; color: var(--sub); line-height: 1.55; }
+.connect-hd { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.connect-hd .tx { flex: 1; min-width: 0; }
+.connect-hd b { display: block; font-size: 15px; font-weight: 600; }
+.connect-hd small { display: block; font-size: 12px; color: var(--sub); margin-top: 1px; }
+.nudge .x, .connect-hd .x { width: 32px; height: 32px; flex: none; border: 0; border-radius: 50%; background: none; color: var(--faint); font-size: 22px; line-height: 1; }
+.nudge .x:hover, .connect-hd .x:hover { background: var(--fill); color: var(--sub); }
+.connect-new { border-top: 1px solid var(--line); margin-top: 4px; padding-top: 14px; }
+/* 市场: the collapsed nudge for owners with no agent yet */
+.nudge { display: flex; gap: 10px; align-items: center; border: 1px solid #cfe0ff; background: #f5f9ff; padding: 12px 8px 12px 14px; }
+.nudge .tx { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; }
+.nudge small { display: block; color: var(--sub); font-size: 12px; font-weight: 400; margin-top: 1px; }
 .add-listing { margin-top: 12px; background: #f8f9fb; border-radius: var(--r); padding: 14px; display: flex; flex-direction: column; }
-.add-listing .add-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 15px; }
+.add-listing .add-hd, .connect-new .add-hd { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 15px; }
 .add-listing .field input, .add-listing .field select, .add-listing .stepper { background-color: #fff; }
 .add-listing .stepper { width: 100%; padding: 0 12px; }
 .add-listing .stepper input { width: 100% !important; text-align: left; }
@@ -449,7 +472,8 @@ form.card > .btn, .card > .btn { margin-top: 12px; }
   .m-list .cap-hd:hover { background: #f7f8fa; }
   .m-list .cap.open .cap-hd { background: var(--blue-soft); }
   .m-detail { position: sticky; top: 24px; padding: 20px; }
-  .pending { margin: 0; }
+  .pending, .nudge { margin: 0; }
+  .connect-card { padding: 18px 20px; }
 
   /* order and buy: work on the left, summary and buttons on the right */
   .head-card { padding: 0; overflow: hidden; }
@@ -490,3 +514,6 @@ form.card > .btn, .card > .btn { margin-top: 12px; }
 
 input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 input[type="number"]::-webkit-inner-spin-button, input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+.grant-list { margin: 0 0 6px; padding-left: 18px; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
+.grant-list b { color: var(--ink); }

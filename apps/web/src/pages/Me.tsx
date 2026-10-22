@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { hive, type AgentGrant } from "../api.ts";
 import { shortDate, typeTitle, yuan } from "../format.ts";
 import { disablePush, enablePush, pushState, type PushState } from "../push.ts";
+import { ConnectAgent, ConnectCard } from "../connect.tsx";
 import { AgentIcon, Bell, LargeTitle, Switch, TabBar, TypeTile, useAction, usePoll, useSession, useToast } from "../ui.tsx";
 
 const toFen = (s: string) => (s.trim() === "" ? null : Math.round(Number(s) * 100));
@@ -106,26 +107,30 @@ function Notify() {
   );
 }
 
-const SOURCE: Record<string, string> = { login: "hive login 授权", api_key: "API key" };
+const SOURCE: Record<string, string> = { login: "授权链接", api_key: "API key" };
 
-// The agents that may order for this account. Hidden until there is one: approving happens through
-// the link an agent sends, never from here.
-function Agents({ grants, reload }: { grants: AgentGrant[]; reload: () => Promise<void> }) {
+// The agents that may act for this account, and the way to connect one: a prompt the owner pastes
+// into their agent, which then sends back an approval link. Approving never happens from here.
+function Agents({ grants, reload }: { grants: AgentGrant[] | null; reload: () => Promise<void> }) {
   const { busy, run } = useAction();
   const toast = useToast();
+  const [adding, setAdding] = useState(false);
 
   async function revoke(g: AgentGrant) {
-    if (!confirm(`撤销「${g.label || "agent"}」？它将不能再替你下单。`)) return;
+    if (!confirm(`撤销「${g.label || "agent"}」？它将不能再替你下单、接单。`)) return;
     if (await run(() => hive.revokeAgent(g.id))) {
       toast("已撤销");
       await reload();
     }
   }
 
-  if (grants.length === 0) return null;
+  if (!grants) return null;
+  if (grants.length === 0) {
+    return <ConnectCard title="我的 agent" sub="还没有接入。复制一句话给它，它自己完成接入" />;
+  }
   return (
     <div className="card">
-      <h4><span>我的 agent</span><small>能替你找服务、下单、验收</small></h4>
+      <h4><span>我的 agent</span><small>能替你找服务、下单、验收、接单</small></h4>
       {grants.map((g) => (
         <div className="list-row" key={g.id}>
           <AgentIcon />
@@ -139,6 +144,16 @@ function Agents({ grants, reload }: { grants: AgentGrant[]; reload: () => Promis
           <button className="btn sm line" type="button" disabled={busy} onClick={() => revoke(g)}>撤销</button>
         </div>
       ))}
+      {adding ? (
+        <div className="connect-new">
+          <div className="add-hd"><b>接入新的 agent</b><button className="link" type="button" onClick={() => setAdding(false)}>收起</button></div>
+          <ConnectAgent />
+        </div>
+      ) : (
+        <button className="add-btn" type="button" onClick={() => setAdding(true)}>
+          <span aria-hidden="true">＋</span>接入新的 agent
+        </button>
+      )}
     </div>
   );
 }
@@ -186,7 +201,8 @@ function ApiKey({ onCreated }: { onCreated: () => Promise<void> }) {
 export function MePage() {
   const { me, logout } = useSession();
   const { data: bill } = usePoll(() => hive.bill(), 15_000);
-  const { data: grants, reload: reloadGrants } = usePoll(() => hive.agents(), 0);
+  // Polled so an agent the owner just approved shows up here without a refresh.
+  const { data: grants, reload: reloadGrants } = usePoll(() => hive.agents(), 5000);
   const entries = [...(bill?.spent.map((e) => ({ ...e, sign: "-" })) ?? []), ...(bill?.earned.map((e) => ({ ...e, sign: "+" })) ?? [])]
     .sort((a, b) => (b.paidAt ?? "").localeCompare(a.paidAt ?? ""))
     .slice(0, 20);
@@ -226,9 +242,9 @@ export function MePage() {
             </div>
           </div>
           <div className="col side-col">
+            <Agents grants={grants} reload={reloadGrants} />
             <Notify />
             <Rules />
-            <Agents grants={grants ?? []} reload={reloadGrants} />
             <div className="card flush">
               <button className="cell-btn danger" type="button" onClick={logout}>退出登录</button>
             </div>

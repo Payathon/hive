@@ -45,6 +45,8 @@ export interface Me {
   actor: "human" | "agent";
   rules: { perOrderCapFen: number | null; dailyCapFen: number | null; paused: boolean };
   humanAccepting: boolean;
+  // `hive serve` polled in the last minute.
+  listenerOnline?: boolean;
   email: string | null;
 }
 

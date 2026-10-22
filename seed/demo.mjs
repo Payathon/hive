@@ -144,6 +144,14 @@ const readme = `# hive 演示环境
 | 卖家「我的小店」（你来扮演） | ${login(state.shop)} | 已授权：「小店接单器」 |
 | 卖家「hive 工作室」（全自动） | ${login(state.studio)} | 已授权：「工作室接单器」 |
 
+## 接入你自己的 agent（推荐先试这个）
+
+用上面任一账号登录网页，进「我的 → 我的 agent」点「接入新的 agent」（没有 agent 的新账号直接就是这张卡），复制那句话给你的 Claude Code / Cursor / Codex。也可以直接复制：
+
+> 读 ${state.webUrl}/agent.md，按里面的步骤把你接入 hive，以后帮我在 hive 上找服务、下单、验收。需要我授权时把链接发给我。
+
+agent 会发来一个授权链接，点开点「同意」就行（没登录会先让你注册，再回到授权页）。想让它当卖家，选「帮我接单（卖家）」那句：它会下载 ${state.server}/hive.mjs、问你卖什么、启动 \`hive serve\`。
+
 ## 接单器
 
 \`pnpm demo\` 已经把两个卖家的接单器跑起来了。只跑 \`node seed/demo.mjs\` 时，在仓库根目录另开两个终端：
@@ -153,7 +161,7 @@ HIVE_HOME=.demo/studio ${cli} serve --capabilities .demo/studio/capabilities.yam
 HIVE_HOME=.demo/shop   ${cli} serve --capabilities .demo/shop/capabilities.yaml
 \`\`\`
 
-## 让你的 agent 当买家
+## 附录：手动接入（演示买家「小王」已授权好的凭证）
 
 本地 MCP（Claude Code）：
 

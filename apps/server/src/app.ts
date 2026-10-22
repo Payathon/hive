@@ -3,6 +3,8 @@ import { Hono, type Context } from "hono";
 import { z } from "zod";
 import { HiveClient } from "@hive/client/api";
 import { createMcpServer } from "@hive/client/mcp";
+import { readFile } from "node:fs/promises";
+import { agentGuide } from "./agent-guide.ts";
 import { Hive, HiveError, MAX_FILE_BYTES, type Principal } from "./hive.ts";
 import { OutboxMailer } from "./mail.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
@@ -26,6 +28,10 @@ const fenAmount = z.number().int().nonnegative();
 export interface AppOptions {
   // Where the web app lives, for links sent to people. Defaults to the origin the request came in on.
   webUrl?: string;
+  // Where agents reach this API, for /agent.md. Defaults to the origin the request came in on.
+  publicUrl?: string;
+  // The bundled CLI (packages/cli/dist/hive.mjs), served at /hive.mjs for agents that sell or lack MCP.
+  cliBundle?: string;
 }
 
 export function createApp(hive: Hive, opts: AppOptions = {}) {
@@ -39,6 +45,27 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
   });
 
   app.get("/healthz", (c) => c.json({ ok: true, payments: hive.payments.name }));
+
+  // ---- for agents -------------------------------------------------------
+  // The owner pastes "读 <url>/agent.md …" into their agent; the page walks it through connecting.
+
+  const publicUrl = (c: Context) => (opts.publicUrl ?? new URL(c.req.url).origin).replace(/\/$/, "");
+  const guide = async (c: Context) => agentGuide(publicUrl(c), await hive.market());
+  const markdown = { "content-type": "text/markdown; charset=utf-8", "cache-control": "no-cache" };
+  app.get("/agent.md", async (c) => c.body(await guide(c), 200, markdown));
+  // The same guide as a Claude Code skill, for agents that keep skills around.
+  app.get("/skill/hive/SKILL.md", async (c) =>
+    c.body(
+      `---\nname: hive\ndescription: Connect to the hive service market (${publicUrl(c)}) and use it: buy services from other agents and people (the owner confirms each payment in Alipay), or take orders with hive serve. Use when the task needs something you can't produce well yourself, or when the owner asks to sell on hive.\n---\n\n${await guide(c)}`,
+      200,
+      markdown,
+    ),
+  );
+  app.get("/hive.mjs", async (c) => {
+    const bytes = opts.cliBundle ? await readFile(opts.cliBundle).catch(() => null) : null;
+    if (!bytes) throw new HiveError(404, "cli_not_built", "the hive CLI bundle isn't built on this server (cd packages/cli && pnpm build)");
+    return c.body(bytes, 200, { "content-type": "text/javascript; charset=utf-8", "cache-control": "no-cache" });
+  });
 
   // ---- public -----------------------------------------------------------
 
@@ -79,19 +106,20 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
   });
 
   // ---- remote MCP -------------------------------------------------------
-  // The buying tools over Streamable HTTP, keyed by an agent token (`hive api-key`).
+  // The buying tools over Streamable HTTP, keyed by an agent token: one from a device login
+  // (/agent.md, `hive login`) or an API key (`hive api-key`).
   // Stateless: each request gets its own server, and tools call this app in-process with the caller's key.
 
   app.all("/mcp", async (c) => {
     const key = c.req.header("authorization")?.replace(/^Bearer\s+/i, "");
     const principal = key ? await hive.authenticate(key) : null;
-    if (!principal) throw new HiveError(401, "unauthorized", "send an API key from `hive api-key` as a Bearer token");
-    if (principal.actor !== "agent") throw new HiveError(403, "agents_only", "use an API key from `hive api-key`, not the owner token");
+    if (!principal) throw new HiveError(401, "unauthorized", "send an agent token (see /agent.md) or an API key as a Bearer token");
+    if (principal.actor !== "agent") throw new HiveError(403, "agents_only", "use an agent token or API key, not the owner token");
     const client = new HiveClient("http://hive.internal", key!, (url, init) => Promise.resolve(app.fetch(new Request(url, init))));
     const server = createMcpServer({
       client: async () => client,
       publicUrl: new URL(c.req.url).origin,
-      unauthorizedHint: "The API key was revoked; ask the owner for a new one.",
+      unauthorizedHint: "The token was revoked; connect again by following /agent.md.",
     });
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
     await server.connect(transport);
@@ -137,6 +165,8 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
       actor: me(c).actor,
       rules: { perOrderCapFen: a.perOrderCapFen, dailyCapFen: a.dailyCapFen, paused: a.paused },
       humanAccepting: a.humanAccepting,
+      // Whether `hive serve` polled lately; the 接单台 nudges sellers to connect an agent when it hasn't.
+      listenerOnline: hive.isListenerOnline(a),
       email: a.email,
     });
   });

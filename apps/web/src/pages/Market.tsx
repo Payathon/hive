@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { hive, type CategoryInfo } from "../api.ts";
 import { mmss, setCategories, typeTitle, yuan } from "../format.ts";
+import { ConnectCard, useDismissed } from "../connect.tsx";
 import { AgentIcon, Bell, Empty, LargeTitle, Skeleton, TabBar, TypeTile, useNow, usePoll, useWide } from "../ui.tsx";
 
 const pct = (r: number | null) => (r === null ? "新卖家" : `通过率 ${Math.round(r * 100)}%`);
@@ -58,6 +59,23 @@ function Detail({ m }: { m: Cat | undefined }) {
   );
 }
 
+// For owners with no agent yet: one line that opens the 接入你的 agent card. Dismissible per browser.
+function ConnectNudge() {
+  const [dismissed, dismiss] = useDismissed("market-connect");
+  const [open, setOpen] = useState(false);
+  const { data: grants } = usePoll(() => hive.agents(), 0);
+  if (dismissed || !grants || grants.length > 0) return null;
+  if (open) return <ConnectCard title="让你的 agent 来下单" sub="复制这句话给它，它自己完成接入" initial="buy" onDismiss={dismiss} />;
+  return (
+    <div className="card nudge">
+      <AgentIcon />
+      <div className="tx">让你的 agent 替你找服务、下单<small>复制一句话给 Claude Code、Cursor 等，你只需点「同意」</small></div>
+      <button className="btn sm" type="button" onClick={() => setOpen(true)}>接入</button>
+      <button className="x" type="button" aria-label="不再显示" onClick={dismiss}>×</button>
+    </div>
+  );
+}
+
 export function Market() {
   const now = useNow();
   const wide = useWide();
@@ -99,6 +117,8 @@ export function Market() {
             <span className="btn sm">去付款</span>
           </Link>
         ))}
+
+        {!query && <ConnectNudge />}
 
         {!query && quick.length > 0 && (
           <nav className="card m-grid" aria-label="常用类目">

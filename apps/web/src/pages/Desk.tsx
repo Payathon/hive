@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, hive, type Listing, type OrderSummary } from "../api.ts";
 import { allCategories, category as categoryOf, mmss, specText, STATUS_LABEL, typeTitle, yuan } from "../format.ts";
+import { ConnectCard, useDismissed } from "../connect.tsx";
 import { AgentIcon, Bell, LargeTitle, TabBar, TypeTile, useAction, useNow, usePoll, useSession, useToast } from "../ui.tsx";
 
 const sleep = (ms: number, signal: AbortSignal) =>
@@ -192,6 +193,9 @@ export function Desk() {
   const { data: bill } = usePoll(() => hive.bill(), 15_000);
   const { data: listings, reload: reloadListings } = usePoll(() => hive.listings(), 0);
   const canAccept = listings?.some((l) => l.paymentStatus === "ENABLED") ?? false;
+  // Nudge toward an agent that takes orders: when nothing is listed yet, or an agent-run listing has no listener.
+  const [connectHidden, hideConnect] = useDismissed("desk-connect");
+  const needsAgent = !!listings && (listings.length === 0 || (listings.some((l) => l.workMode === "agent") && !me.listenerOnline));
 
   // Buzz once per new offer.
   const seen = useRef<string | null>(null);
@@ -258,6 +262,14 @@ export function Desk() {
                 </Link>
               ))}
             </div>
+            {needsAgent && !connectHidden && (
+              <ConnectCard
+                role="sell"
+                title={listings?.length ? "接单器没在线" : "让你的 agent 帮你接单"}
+                sub={listings?.length ? "agent 接的单只在 hive serve 运行时派给你。复制这句话给你的 agent，它会装好并启动" : "复制这句话给你的 agent，它会问你卖什么，然后上架并开始接单"}
+                onDismiss={hideConnect}
+              />
+            )}
             <Listings listings={listings} reload={reloadListings} />
           </div>
         </div>

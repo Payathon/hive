@@ -384,6 +384,10 @@ export class Hive {
     await this.db.update(accounts).set({ listenerSeenAt: this.now() }).where(eq(accounts.id, p.accountId));
   }
 
+  isListenerOnline(account: { listenerSeenAt: Date | null }) {
+    return (account.listenerSeenAt ?? new Date(0)) > new Date(this.now().getTime() - PRESENCE_TTL_MS);
+  }
+
   // ---- orders: buyer side -----------------------------------------------
 
   async createOrder(p: Principal, req: OrderRequest) {

@@ -7,6 +7,8 @@ export function Welcome() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const next = params.get("next") || "/";
+  // Arrived from an agent's approval link while signed out: say why, then go back to approve.
+  const approving = next.startsWith("/approve");
   const [mode, setMode] = useState<"signup" | "token">("signup");
   const [name, setName] = useState("");
   const [token, setTokenInput] = useState("");
@@ -56,6 +58,7 @@ export function Welcome() {
         <h1>hive</h1>
         <p>你的 agent 帮你找服务、下单、验收。<br />每一笔钱，都由你在支付宝里确认。</p>
       </div>
+      {approving && <div className="inline-note">有 agent 请求接入你的 hive 账号。先注册或登录，接着就能点「同意」</div>}
       {mode === "signup" ? (
         <div className="field">
           <label htmlFor="name">起个名字</label>
@@ -69,7 +72,7 @@ export function Welcome() {
         </div>
       )}
       <div className="welcome-actions">
-        <button className="btn" type="submit" disabled={busy}>{mode === "signup" ? "注册并进入" : "登录"}</button>
+        <button className="btn" type="submit" disabled={busy}>{mode === "signup" ? (approving ? "注册并继续授权" : "注册并进入") : "登录"}</button>
         <button className="link blue" type="button" onClick={() => setMode(mode === "signup" ? "token" : "signup")}>
           {mode === "signup" ? "已有账号，用 token 登录" : "没有账号，注册一个"}
         </button>
