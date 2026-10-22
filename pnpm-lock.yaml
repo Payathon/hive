@@ -37,6 +37,9 @@ importers:
       pg:
         specifier: ^8.23.1
         version: 8.23.1
+      tsx:
+        specifier: ^4.23.15
+        version: 4.23.15
       web-push:
         specifier: ^3.6.7
         version: 3.6.7
@@ -62,9 +65,6 @@ importers:
       drizzle-kit:
         specifier: ^0.31.11
         version: 0.31.11
-      tsx:
-        specifier: ^4.23.15
-        version: 4.23.15
       typescript:
         specifier: ^7.0.2
         version: 7.0.2

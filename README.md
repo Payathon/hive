@@ -51,7 +51,7 @@ cd packages/cli && pnpm build   # 产出 dist/hive.mjs
 alias hive="node $PWD/dist/hive.mjs"
 ```
 
-CLI 也发到了 npm：`npx hive-market <命令>`（命令名仍是 `hive`；用 `HIVE_SERVER` 指向服务端，默认 localhost:8787）。发新版：改 `packages/cli/publish.mjs` 里的版本号，在真终端里跑 `node publish.mjs`（npm 要在浏览器里确认 2FA，Claude Code 里跑不了）。
+CLI 也发到了 npm：`npx hive-market <命令>`（命令名仍是 `hive`；用 `HIVE_SERVER` 指向服务端，默认 localhost:8787，发版时可用 `HIVE_DEFAULT_SERVER` 换成公网地址）。发新版：推一个 `cli-v<版本>` tag，GitHub Actions 用 trusted publishing 发布（见 [deploy/README.md](deploy/README.md)）；手动发：`node packages/cli/publish.mjs --version=<版本>`（npm 要在浏览器里确认 2FA）。
 
 默认使用假支付（没配支付宝凭证时）：购买链接指向 `/v1/dev/fake-pay/...`，POST 一下就相当于买家在支付宝里确认了。真实支付默认走即刻收直连模式，配齐凭证和商品 ID 就自动启用（详见 `docs/mvp.md`「接真实收款」）：
 
@@ -60,6 +60,10 @@ ALIPAY_APP_ID=... ALIPAY_PRIVATE_KEY_PATH=... ALIPAY_PUBLIC_KEY_PATH=... NOWPAY_
 ```
 
 平台模式（以后用）：`PAYMENTS=platform`，同样的三项凭证。
+
+## 部署
+
+一台香港区云服务器 + 域名，`docker compose up -d` 起 hive、Postgres 和 Caddy（自动 HTTPS）；`main` 上 CI 通过后自动推镜像到 GHCR 并上线。步骤、环境变量、GitHub secrets 见 [deploy/README.md](deploy/README.md)。
 
 ## 跑一遍 demo 流程
 
@@ -120,4 +124,5 @@ claude mcp add hive -e HIVE_SERVER=http://localhost:8787 -- node $PWD/packages/c
 ```sh
 pnpm test        # 全部包
 pnpm typecheck
+TEST_DATABASE_URL=postgres://postgres:test@localhost:5432/postgres pnpm test   # 对真 Postgres 跑（每次建新库，用一次性的实例）
 ```

@@ -1,0 +1,68 @@
+# Production stack for one Linux VM: hive + Postgres + Caddy (automatic HTTPS).
+# In /opt/hive next to .env and Caddyfile:  docker compose pull && docker compose up -d
+# Build the image on the machine instead of pulling it (needs the repo checked out, see deploy/README.md):
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+name: hive
+
+x-logging: &logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "3" }
+
+services:
+  hive:
+    image: ${HIVE_IMAGE:-ghcr.io/payathon/hive:latest}
+    restart: unless-stopped
+    init: true
+    env_file: .env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://hive:${POSTGRES_PASSWORD}@postgres:5432/hive}
+      PUBLIC_URL: ${PUBLIC_URL:-https://${DOMAIN}}
+      WEB_URL: ${WEB_URL:-https://${DOMAIN}}
+    volumes:
+      # Delivered files, vapid.json (Web Push keys), fake-pay.json (fake payment state).
+      - hive-data:/data
+      # Optional key files for ALIPAY_*_PATH (e.g. /secrets/app_private.txt); inline keys need nothing here.
+      - ./secrets:/secrets:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *logging
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hive
+      POSTGRES_DB: hive
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hive -d hive"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    logging: *logging
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    environment:
+      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - hive
+    logging: *logging
+
+volumes:
+  pgdata:
+  hive-data:
+  caddy-data:
+  caddy-config:

@@ -1,0 +1,11 @@
+# HTTPS for ${DOMAIN}: Caddy gets and renews a Let's Encrypt certificate on its own (ports 80 and 443
+# must reach this machine, and the domain's A record must point at it).
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy hive:8787 {
+		# Pass every byte through as it comes, so /mcp streams and long polls are never buffered.
+		flush_interval -1
+	}
+	# Caddy sets no read/write timeout on proxied requests, so /v1/seller/poll (holds up to 25 s)
+	# and /mcp are not cut; the hive server answers each long poll before Node's own limits.
+}

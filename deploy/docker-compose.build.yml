@@ -1,0 +1,8 @@
+# Fallback: build the hive image from this checkout instead of pulling it from GHCR.
+#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+services:
+  hive:
+    image: hive:local
+    build:
+      context: ..
+      dockerfile: Dockerfile

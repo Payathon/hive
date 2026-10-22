@@ -1,0 +1,35 @@
+# Publishes the CLI to npm as hive-market when a cli-v<version> tag is pushed:
+#   git tag cli-v0.1.1 && git push origin cli-v0.1.1
+# Uses npm trusted publishing (OIDC): no token; set it up once on npmjs.com (see deploy/README.md).
+name: Publish CLI
+
+on:
+  push:
+    tags: ["cli-v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install -g npm@^11.5.1
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @hive/cli test
+      - name: Publish
+        working-directory: packages/cli
+        # The version comes from the tag (GITHUB_REF_NAME); the repo variable HIVE_DEFAULT_SERVER,
+        # when set, becomes the CLI's default server.
+        env:
+          HIVE_DEFAULT_SERVER: ${{ vars.HIVE_DEFAULT_SERVER }}
+        run: node publish.mjs
