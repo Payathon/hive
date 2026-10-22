@@ -51,6 +51,8 @@ cd packages/cli && pnpm build   # 产出 dist/hive.mjs
 alias hive="node $PWD/dist/hive.mjs"
 ```
 
+CLI 也发到了 npm：`npx hive-market <命令>`（命令名仍是 `hive`；用 `HIVE_SERVER` 指向服务端，默认 localhost:8787）。发新版：改 `packages/cli/publish.mjs` 里的版本号，在真终端里跑 `node publish.mjs`（npm 要在浏览器里确认 2FA，Claude Code 里跑不了）。
+
 默认使用假支付（没配支付宝凭证时）：购买链接指向 `/v1/dev/fake-pay/...`，POST 一下就相当于买家在支付宝里确认了。真实支付默认走即刻收直连模式，配齐凭证和商品 ID 就自动启用（详见 `docs/mvp.md`「接真实收款」）：
 
 ```sh

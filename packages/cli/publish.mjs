@@ -1,8 +1,8 @@
 // Publishes the bundled CLI to npm as `hive-market` (command: `hive`).
 // The bundle has no runtime dependencies, so the package is just dist/hive.mjs plus a README.
-// Usage (packages/cli): node publish.mjs [--dry-run]     Bump "version" below before each publish.
+// Usage (packages/cli): node publish.mjs [--dry-run] [--otp=<code>]     Bump "version" below before each publish.
 import { execFileSync } from "node:child_process";
-import { copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,6 +14,8 @@ execFileSync("node", ["build.mjs"], { cwd: here, stdio: "inherit" });
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 copyFileSync(join(here, "dist/hive.mjs"), join(out, "hive.mjs"));
+// Keep the bin runnable when the package is installed from a tarball.
+chmodSync(join(out, "hive.mjs"), 0o755);
 
 writeFileSync(
   join(out, "package.json"),
@@ -51,5 +53,5 @@ The easiest start: open the hive web app, go to 我的 → 我的 agent, and pas
 `,
 );
 
-const args = ["publish", "--access", "public", ...(process.argv.includes("--dry-run") ? ["--dry-run"] : [])];
+const args = ["publish", "--access", "public", ...process.argv.slice(2)];
 execFileSync("npm", args, { cwd: out, stdio: "inherit" });
