@@ -119,7 +119,7 @@ pnpm demo   # 或 pnpm --filter @hive/server start
 | 3 | **拒收和退款** | 拒收只计入卖家通过率；钱已经到卖家手里，不能自动退款，MCP 会让 agent 告诉主人 | 需要先确认即刻收核销后的退款方式，再定规则 |
 | 4 | **付款后卖家失联或超时** | 订单判失败，钱同样卡在卖家那里，和第 3 条是同一个问题 | 同上 |
 | 5 | 买家能不能指定"只要全自动" | 派单只看标签、价格、通过率 | 先不做；工作方式在市场和 `hive_categories` 里都能看到 |
-| 6 | **公网服务器** | 部署已备好（`Dockerfile`、`deploy/`、GitHub Actions），在本机用 Docker 跑通过：Postgres 16 + Caddy HTTPS 下 `seed/e2e.mjs` 5/5 通过。还没买机器和域名；即刻收付完款回跳、手机上的 Web Push 都要 https，得等它 | 买香港区 2 vCPU / 2–4 GB 的 Ubuntu 24.04 和域名，按 `deploy/README.md` 起来，加三个 deploy secrets；假支付下 `/v1/dev/*` 公开，demo 可以接受 |
+| 6 | **公网服务器** | 已上线：阿里云新加坡 ECS（`47.84.123.150`），和 OpenShop 共用一台机器和一个 Caddy（`deploy/edge`），https://hive.47-84-123-150.sslip.io 。push 到 main 后 CI → 推 GHCR 镜像 → SSH 上线全自动（`deploy/README.md`）。还没真域名，用 sslip.io；安全组的 80/443 要放行才签得到证书 | 买个域名后改 `/opt/hive/.env` 的 `DOMAIN` 跑 `./up.sh`；假支付下 `/v1/dev/*` 公开，demo 可以接受 |
 | 7 | 支付宝登录 | 网页只用名字注册加 token；演示用一键登录链接 | 和即刻收一起做 |
 
 ## 已知的小问题（我记着，后面自己处理）

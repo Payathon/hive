@@ -1,5 +1,6 @@
 # Fallback: build the hive image from this checkout instead of pulling it from GHCR.
-#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+# Add it to COMPOSE_FILE in .env (docker-compose.yml:docker-compose.edge.yml:docker-compose.build.yml)
+# and run ./up.sh, which then builds instead of pulling. The checkout must be the parent directory.
 services:
   hive:
     image: hive:local

@@ -1,0 +1,3 @@
+# One site file per app, written by that app's up.sh (hive.caddy, openshop.caddy, ...).
+# Caddy sets no read/write timeout on proxied requests, so long polls and /mcp streams are not cut.
+import /etc/caddy/sites/*.caddy

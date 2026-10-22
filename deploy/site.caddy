@@ -1,0 +1,9 @@
+# hive's site on the shared edge Caddy. up.sh puts DOMAIN from .env in place of the site address below and writes
+# the result to /opt/edge/sites/hive.caddy. Same rules as Caddyfile (the standalone variant).
+__DOMAIN__ {
+	encode zstd gzip
+	reverse_proxy hive:8787 {
+		# Pass every byte through as it comes, so /mcp streams and long polls are never buffered.
+		flush_interval -1
+	}
+}

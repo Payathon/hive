@@ -83,7 +83,11 @@ jobs:
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
       - name: Copy compose files
         if: steps.check.outputs.ready == 'true'
-        run: scp -i ~/.ssh/deploy deploy/docker-compose.yml deploy/Caddyfile "$DEPLOY_USER@$DEPLOY_HOST:/opt/hive/"
+        run: |
+          ssh -i ~/.ssh/deploy "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p /opt/hive /opt/edge/sites"
+          scp -i ~/.ssh/deploy deploy/docker-compose*.yml deploy/Caddyfile deploy/site.caddy deploy/up.sh "$DEPLOY_USER@$DEPLOY_HOST:/opt/hive/"
+          # The shared edge Caddy (used when /opt/hive/.env picks docker-compose.edge.yml).
+          scp -i ~/.ssh/deploy deploy/edge/docker-compose.yml deploy/edge/Caddyfile deploy/edge/up.sh "$DEPLOY_USER@$DEPLOY_HOST:/opt/edge/"
       - name: Pull and restart
         if: steps.check.outputs.ready == 'true'
         env:
@@ -94,20 +98,19 @@ jobs:
           printf '%s' "$GHCR_TOKEN" | ssh -i ~/.ssh/deploy "$DEPLOY_USER@$DEPLOY_HOST" "
             set -e
             cd /opt/hive
+            chmod +x up.sh /opt/edge/up.sh
             docker login ghcr.io -u '${{ github.actor }}' --password-stdin
-            export HIVE_IMAGE=$IMAGE:$TAG
-            docker compose pull hive
-            docker logout ghcr.io
-            # Keep :latest on the server pointing at what runs, for manual 'docker compose up -d'.
-            docker tag \$HIVE_IMAGE $IMAGE:latest
-            docker compose up -d --remove-orphans
+            trap 'docker logout ghcr.io >/dev/null' EXIT
+            HIVE_IMAGE=$IMAGE:$TAG ./up.sh
+            # Keep :latest on the server pointing at what runs, for a manual ./up.sh without HIVE_IMAGE.
+            docker tag $IMAGE:$TAG $IMAGE:latest
             docker image prune -f
           "
       - name: Health check
         if: steps.check.outputs.ready == 'true'
         run: |
           for _ in $(seq 1 30); do
-            if ssh -i ~/.ssh/deploy "$DEPLOY_USER@$DEPLOY_HOST" "docker compose -f /opt/hive/docker-compose.yml exec -T hive node -e \"fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""; then
+            if ssh -i ~/.ssh/deploy "$DEPLOY_USER@$DEPLOY_HOST" "cd /opt/hive && docker compose exec -T hive node -e \"fetch('http://127.0.0.1:8787/healthz').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))\""; then
               echo "healthy"; exit 0
             fi
             sleep 5

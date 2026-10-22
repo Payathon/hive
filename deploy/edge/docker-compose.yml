@@ -1,0 +1,32 @@
+# The shared edge for a server that runs several apps (hive, openshop, ...): one Caddy on 80/443
+# that gets every certificate and proxies each domain to its app over the external `edge` network.
+# Lives in /opt/edge. Each app's up.sh writes its own site file into /opt/edge/sites/ and reloads
+# Caddy, so the domains stay in each app's .env and this directory needs no settings.
+#   docker network create edge && docker compose up -d
+name: edge
+
+services:
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./sites:/etc/caddy/sites:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks: [edge]
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
+
+networks:
+  edge:
+    external: true
+
+volumes:
+  caddy-data:
+  caddy-config:

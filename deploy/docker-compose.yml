@@ -1,7 +1,9 @@
-# Production stack for one Linux VM: hive + Postgres + Caddy (automatic HTTPS).
-# In /opt/hive next to .env and Caddyfile:  docker compose pull && docker compose up -d
-# Build the image on the machine instead of pulling it (needs the repo checked out, see deploy/README.md):
-#   docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build
+# Production stack for one Linux VM: hive + Postgres. HTTPS comes from one of two overrides,
+# picked with COMPOSE_FILE in .env (see deploy/README.md):
+#   docker-compose.edge.yml    shared server: join the `edge` network, the edge Caddy (deploy/edge) proxies to hive
+#   docker-compose.caddy.yml   hive alone on the machine: its own Caddy on 80/443
+# In /opt/hive next to .env:  ./up.sh   (CD runs the same script)
+# Build the image on the machine instead of pulling it: add docker-compose.build.yml to COMPOSE_FILE.
 name: hive
 
 x-logging: &logging
@@ -44,25 +46,6 @@ services:
       retries: 20
     logging: *logging
 
-  caddy:
-    image: caddy:2
-    restart: unless-stopped
-    environment:
-      DOMAIN: ${DOMAIN:?set DOMAIN in .env}
-    ports:
-      - "${HTTP_PORT:-80}:80"
-      - "${HTTPS_PORT:-443}:443"
-      - "${HTTPS_PORT:-443}:443/udp"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - hive
-    logging: *logging
-
 volumes:
   pgdata:
   hive-data:
-  caddy-data:
-  caddy-config:

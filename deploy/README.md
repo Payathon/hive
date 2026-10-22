@@ -1,22 +1,57 @@
 # 部署到公网
 
-一台香港区的 Linux 云服务器（阿里云或腾讯云，香港区不用 ICP 备案），一个域名，Caddy 自动申请 Let's Encrypt 证书。服务器上只有三个容器：`hive`（API + 网页 + `/hive.mjs`）、`postgres`、`caddy`。
+现在跑在一台阿里云新加坡 ECS 上（2 vCPU / 3.5 GB，Ubuntu 22.04，`47.84.123.150`），和 [OpenShop](https://github.com/Payathon/openshop) 共用这台机器：
+
+| 地址 | 应用 |
+|---|---|
+| https://hive.47-84-123-150.sslip.io | hive（API + 网页 + `/hive.mjs`） |
+| https://shop.47-84-123-150.sslip.io | OpenShop |
+
+还没有真域名，用的是 [sslip.io](https://sslip.io)：`<任意名字>.47-84-123-150.sslip.io` 自动解析到这个 IP，Let's Encrypt 照样能签证书。
+
+## 服务器上的布局
+
+```
+/opt/edge     共用的 Caddy（项目名 edge）：占 80/443，签所有证书，按域名转给各个应用
+  docker-compose.yml  Caddyfile  up.sh     ← 来自本仓库 deploy/edge/，hive 的 CD 每次覆盖
+  sites/hive.caddy  sites/openshop.caddy   ← 各应用的 up.sh 生成，域名取自各自的 .env
+/opt/hive     hive + postgres（项目名 hive，数据卷 hive_pgdata、hive_hive-data）
+  .env  docker-compose*.yml  Caddyfile  site.caddy  up.sh  secrets/
+/opt/openshop app + postgres + backup（项目名 openshop），见 openshop 仓库的 docs/deploy.md
+```
+
+三个 compose 项目通过一个外部 docker 网络 `edge` 连起来：hive 在上面叫 `hive`，OpenShop 叫 `openshop`。应用自己不占任何端口。哪个应用没起来，只有它的域名返回 502，别的不受影响。
 
 | 文件 | 作用 |
 |---|---|
 | `../Dockerfile` | hive 镜像：构建网页和 CLI，用 tsx 跑服务端，非 root，带 `/healthz` 健康检查 |
-| `docker-compose.yml` | 三个服务和数据卷（Postgres 数据、Caddy 证书、hive 的 `/data`：交付文件、`vapid.json`、`fake-pay.json`） |
-| `docker-compose.build.yml` | 备用：在服务器上从源码构建镜像，不从 GHCR 拉 |
-| `Caddyfile` | `${DOMAIN}` 的 HTTPS 反代；不缓冲、不设超时，长轮询 `/v1/seller/poll` 和 `/mcp` 不会被切断 |
+| `docker-compose.yml` | hive、postgres 和数据卷（Postgres 数据、hive 的 `/data`：交付文件、`vapid.json`、`fake-pay.json`） |
+| `docker-compose.edge.yml` | 共用服务器：hive 加入 `edge` 网络 |
+| `docker-compose.caddy.yml` | 这台机器只跑 hive：自带 Caddy，占 80/443（用 `Caddyfile`） |
+| `docker-compose.build.yml` | 备用：从源码构建镜像，不从 GHCR 拉 |
+| `site.caddy` | hive 在共用 Caddy 上的站点配置模板；`up.sh` 填上域名写到 `/opt/edge/sites/hive.caddy`。不缓冲、不设超时，长轮询 `/v1/seller/poll` 和 `/mcp` 不会被切断 |
+| `up.sh` | 启动或更新：拉镜像、`up -d`、写站点配置、启动或 reload 共用 Caddy。CD 和手动都用它 |
+| `edge/` | 共用 Caddy 本身（compose、只有一行 `import` 的 Caddyfile、`up.sh`） |
 | `.env.example` | 所有环境变量的说明，复制成 `/opt/hive/.env` |
 | `setup.sh` | 新机器一次性初始化：装 Docker 和 compose 插件、建 `/opt/hive`、小内存机器加 swap |
 
-## 1. 买机器、配域名
+用哪几个 compose 文件由 `.env` 里的 `COMPOSE_FILE` 决定（docker compose 自己会读），所以在 `/opt/hive` 里直接敲 `docker compose ps`、`docker compose logs -f hive` 就行，不用带 `-f`：
 
-1. 买一台云服务器：**香港区**，2 vCPU / 2–4 GB 内存，系统 **Ubuntu 24.04**（22.04 也行），带公网 IP。
-2. 安全组放行入方向 **22、80、443**（TCP；443 再加 UDP 给 HTTP/3 可选）。80 必须开，签证书要用。
+- 共用服务器：`COMPOSE_FILE=docker-compose.yml:docker-compose.edge.yml`（现在用的）
+- 只跑 hive：`COMPOSE_FILE=docker-compose.yml:docker-compose.caddy.yml`
+
+## 换成真域名
+
+1. 域名加 A 记录指向服务器 IP（OpenShop 以后做店铺子域名时再加 `*`）。
+2. 改 `/opt/hive/.env` 的 `DOMAIN`（`PUBLIC_URL`、`WEB_URL` 默认跟着它），在 `/opt/hive` 里跑 `./up.sh`。共用 Caddy 会重新生成站点配置并自动签新证书。OpenShop 同理：改 `/opt/openshop/.env` 的 `OPENSHOP_DOMAIN`，跑 `/opt/openshop/up.sh`。
+3. 旧域名的站点会消失；已经发出去的一键登录链接、`/agent.md` 里写的地址要用新的重新发。
+
+## 1. 买机器、配域名（新机器才需要）
+
+1. 买一台云服务器：**新加坡区**（OpenShop 要从服务器调 Claude API，香港不行），2 vCPU / 2–4 GB 内存，系统 **Ubuntu 24.04**（22.04 也行），带公网 IP。
+2. 安全组放行入方向 **TCP 22、80、443**（UDP 443 给 HTTP/3，可选），来源 `0.0.0.0/0`。80 必须开，签证书要用。
 3. 创建时绑定你的 SSH 公钥（或之后放进 `~/.ssh/authorized_keys`）。登录用户：阿里云 Ubuntu 一般是 `root`，腾讯云是 `ubuntu`。
-4. 域名加一条 **A 记录**指向服务器公网 IP（例如 `hive.example.com`）。用 `dig +short hive.example.com` 确认解析到了再往下走，不然 Caddy 签不到证书。
+4. 有域名就加一条 **A 记录**指向服务器公网 IP，`dig +short hive.example.com` 确认解析到了再往下走；没有就用 `hive.<IP 用横线连>.sslip.io`。
 
 ## 2. 初始化服务器（只做一次）
 
@@ -28,33 +63,35 @@ ssh <user>@<ip> 'bash setup.sh'
 
 ## 3. 填 `.env`，启动
 
+最省事的是先填好 `.env`，再让 CD（第 6 节）把其余文件拷上去并启动。手动的话：
+
 ```sh
-scp deploy/docker-compose.yml deploy/Caddyfile <user>@<ip>:/opt/hive/
+ssh <user>@<ip> 'mkdir -p /opt/hive /opt/edge'
+scp deploy/docker-compose*.yml deploy/Caddyfile deploy/site.caddy deploy/up.sh <user>@<ip>:/opt/hive/
+scp deploy/edge/docker-compose.yml deploy/edge/Caddyfile deploy/edge/up.sh <user>@<ip>:/opt/edge/
 scp deploy/.env.example <user>@<ip>:/opt/hive/.env
 ssh <user>@<ip>
 cd /opt/hive
-vi .env            # 至少填 DOMAIN 和 POSTGRES_PASSWORD（openssl rand -hex 24）
-docker compose pull
-docker compose up -d
+vi .env            # 至少填 DOMAIN 和 POSTGRES_PASSWORD（openssl rand -hex 24），选好 COMPOSE_FILE
+./up.sh
 ```
 
 `PUBLIC_URL`、`WEB_URL` 默认都是 `https://$DOMAIN`（网页和 API 同源），`DATABASE_URL` 默认连 compose 里的 Postgres，一般都不用填。服务端每次启动自动跑数据库迁移。
 
-**镜像拉不下来？** `ghcr.io/payathon/hive` 是私有包时，服务器要先登录：在 GitHub 建一个只有 `read:packages` 权限的 classic token，`echo <token> | docker login ghcr.io -u <github 用户名> --password-stdin`。或者在 GitHub 组织的 Packages → hive → Package settings 里把可见性改成 Public，就不用登录（镜像里没有密钥，公开没问题）。自动部署不受影响：它每次用工作流自己的 token 临时登录再拉。
+**镜像拉不下来？** `ghcr.io/payathon/hive` 默认是私有包，服务器上手动 `./up.sh` 时拉不到就继续用机器上已有的镜像（CD 每次会用工作流自己的 token 临时登录再拉，不受影响）。想让手动也能拉：在 GitHub 组织的 Packages → hive → Package settings 里把可见性改成 Public（镜像里没有密钥），或者在服务器上 `docker login ghcr.io`（一个只有 `read:packages` 的 classic token）。
 
-**不用 GHCR，在服务器上直接构建**：把仓库 clone 到服务器上，在 `deploy/` 目录里放 `.env`，然后
-`docker compose -f docker-compose.yml -f docker-compose.build.yml up -d --build`。
+**不用 GHCR，在服务器上直接构建**：把仓库 clone 到服务器上，在 clone 的 `deploy/` 目录里放 `.env`，`COMPOSE_FILE` 末尾加上 `:docker-compose.build.yml`，然后在那里跑 `./up.sh`。
 
 ## 4. 验证
 
 ```sh
 curl https://hive.example.com/healthz      # {"ok":true,"payments":"fake"}
 curl https://hive.example.com/agent.md     # 里面的地址应该是 https://hive.example.com
-docker compose ps                          # 三个都是 running，hive 和 postgres 是 healthy
+docker compose ps                          # hive 和 postgres 都是 healthy
 docker compose logs -f hive                # hive server on https://hive.example.com (payments: fake, mail: outbox)
 ```
 
-证书第一次签发要几秒到一分钟；签不下来看 `docker compose logs caddy`，通常是 A 记录没生效或 80 端口没放行。
+证书第一次签发要几秒到一分钟；签不下来看 `docker compose -f /opt/edge/docker-compose.yml logs caddy`（只跑 hive 时是 `docker compose logs caddy`），通常是 A 记录没生效或 80/443 没放行（日志里是 `Timeout during connect (likely firewall problem)`）。
 
 ## 注意：假支付下的公开页面
 
@@ -93,7 +130,7 @@ HIVE_DEMO_DIR=.demo-public node seed/e2e.mjs   # 把所有工作方式走一遍�
 | 工作流 | 触发 | 做什么 |
 |---|---|---|
 | `ci.yml` | push、PR | 装依赖、typecheck、测试（PGlite 一遍、Postgres 16 一遍）、构建网页和 CLI、构建镜像（不推） |
-| `deploy.yml` | `main` 上 CI 通过后（也可手动触发） | 构建镜像推到 `ghcr.io/payathon/hive`（`sha-<12位>` 和 `latest`），再 SSH 到服务器：复制 compose 文件和 Caddyfile、拉新镜像、`up -d`、等健康检查通过 |
+| `deploy.yml` | `main` 上 CI 通过后（也可手动触发：`gh workflow run deploy.yml -R Payathon/hive`） | 构建镜像推到 `ghcr.io/payathon/hive`（`sha-<12位>` 和 `latest`），再 SSH 到服务器：把 `deploy/` 的文件拷到 `/opt/hive`、`deploy/edge/` 拷到 `/opt/edge`，临时登录 GHCR，`HIVE_IMAGE=…:sha-… ./up.sh`，等健康检查通过 |
 | `npm.yml` | 推 `cli-v*` tag | 把 CLI 发到 npm（`hive-market`） |
 
 **要在仓库 Settings → Secrets and variables → Actions 里加的 secrets**（没加时 deploy 只推镜像，跳过上线，不会变红）：
@@ -102,9 +139,11 @@ HIVE_DEMO_DIR=.demo-public node seed/e2e.mjs   # 把所有工作方式走一遍�
 |---|---|
 | `DEPLOY_HOST` | 服务器公网 IP 或域名 |
 | `DEPLOY_USER` | SSH 用户（`root` / `ubuntu`），要在 docker 组里 |
-| `DEPLOY_SSH_KEY` | 给 CI 专用的私钥全文。生成：`ssh-keygen -t ed25519 -f hive-deploy -N ''`，把 `hive-deploy.pub` 追加到服务器的 `~/.ssh/authorized_keys` |
+| `DEPLOY_SSH_KEY` | 给 CI 专用的私钥全文。生成：`ssh-keygen -t ed25519 -f payathon-deploy -N ''`，把 `.pub` 追加到服务器的 `~/.ssh/authorized_keys` |
 
-`.env` 只在服务器上，CI 不碰它；改了 `.env` 后在服务器上 `docker compose up -d` 生效。回滚：`HIVE_IMAGE=ghcr.io/payathon/hive:sha-<旧版本> docker compose up -d`。
+现在两个仓库（hive、openshop）都已经设好这三个 secret，用的是同一把 deploy key（`~/.ssh/payathon_deploy`，公钥在服务器 root 的 `authorized_keys` 里）：`DEPLOY_HOST=47.84.123.150`、`DEPLOY_USER=root`。
+
+`.env` 只在服务器上，CI 不碰它；改了 `.env` 后在 `/opt/hive` 跑 `./up.sh` 生效。回滚：`HIVE_IMAGE=ghcr.io/payathon/hive:sha-<旧版本> ./up.sh`（私有包要先 `docker login ghcr.io`，或者用机器上还留着的镜像）。
 
 ## 7. 发 CLI 到 npm（trusted publishing）
 

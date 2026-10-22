@@ -37,9 +37,9 @@ if [ "$USER_NAME" != "root" ] && ! id -nG "$USER_NAME" | grep -qw docker; then
   $SUDO usermod -aG docker "$USER_NAME"
 fi
 
-echo "==> /opt/hive"
-$SUDO mkdir -p /opt/hive/secrets
-$SUDO chown -R "$USER_NAME":"$USER_NAME" /opt/hive
+echo "==> /opt/hive, /opt/edge"
+$SUDO mkdir -p /opt/hive/secrets /opt/edge/sites
+$SUDO chown -R "$USER_NAME":"$USER_NAME" /opt/hive /opt/edge
 
 # 2 vCPU / 2 GB machines: swap keeps image pulls and Postgres from hitting the OOM killer.
 if [ "$(swapon --show --noheadings | wc -l)" -eq 0 ] && [ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 3500000 ]; then
@@ -59,9 +59,9 @@ fi
 cat <<MSG
 
 Done. Next:
-  1. Put docker-compose.yml, Caddyfile and .env (from .env.example) into /opt/hive
-     (the deploy workflow copies the first two on every push to main).
-  2. cd /opt/hive && docker compose pull && docker compose up -d
+  1. Put .env (from deploy/.env.example) into /opt/hive; the deploy workflow copies the
+     compose files, up.sh and the edge Caddy (/opt/edge) on every push to main.
+  2. cd /opt/hive && ./up.sh   (or let CD run it)
   3. curl https://<your domain>/healthz
 Make sure the cloud security group allows inbound 22, 80 and 443 (80 is needed for the certificate).
 MSG

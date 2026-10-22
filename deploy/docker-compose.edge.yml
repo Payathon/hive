@@ -1,0 +1,12 @@
+# Shared server: hive joins the external `edge` network as `hive`, and the edge Caddy
+# (/opt/edge, from deploy/edge) proxies $DOMAIN to it. Nothing here publishes a port.
+services:
+  hive:
+    networks:
+      default:
+      edge:
+        aliases: [hive]
+
+networks:
+  edge:
+    external: true
