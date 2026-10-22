@@ -9,6 +9,11 @@ export interface Config {
   pendingLogin: { id: string; secret: string } | null;
 }
 
+// The server the CLI talks to when neither HIVE_SERVER nor a saved config names one. The npm build
+// bakes in the production URL (publish.mjs sets HIVE_DEFAULT_SERVER, build.mjs defines it); repo builds
+// and tsx runs fall back to the local dev server.
+export const DEFAULT_SERVER = process.env.HIVE_DEFAULT_SERVER || "http://localhost:8787";
+
 export const hiveHome = () => process.env.HIVE_HOME ?? join(homedir(), ".hive");
 const configPath = () => join(hiveHome(), "config.json");
 
@@ -20,7 +25,7 @@ export async function loadConfig(): Promise<Config> {
     // first run
   }
   return {
-    server: process.env.HIVE_SERVER ?? saved.server ?? "http://localhost:8787",
+    server: process.env.HIVE_SERVER ?? saved.server ?? DEFAULT_SERVER,
     token: process.env.HIVE_TOKEN ?? saved.token ?? null,
     pendingLogin: saved.pendingLogin ?? null,
   };
