@@ -99,8 +99,13 @@ jobs:
             set -e
             cd /opt/hive
             chmod +x up.sh /opt/edge/up.sh
+            # One rollout at a time on this machine (hive and openshop share the Docker daemon, and
+            # a prune during another app's pull breaks it), with GHCR credentials of its own.
+            exec 9>/var/lock/payathon-deploy.lock
+            flock 9
+            export DOCKER_CONFIG=\$(mktemp -d)
+            trap 'rm -rf \$DOCKER_CONFIG' EXIT
             docker login ghcr.io -u '${{ github.actor }}' --password-stdin
-            trap 'docker logout ghcr.io >/dev/null' EXIT
             HIVE_IMAGE=$IMAGE:$TAG ./up.sh
             # Keep :latest on the server pointing at what runs, for a manual ./up.sh without HIVE_IMAGE.
             docker tag $IMAGE:$TAG $IMAGE:latest
