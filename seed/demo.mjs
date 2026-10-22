@@ -127,9 +127,9 @@ try {
 }
 
 const login = (p) => `${state.webUrl}/welcome#token=${p.ownerToken}`;
-// Push needs a secure context: http://localhost is one, the LAN address is not.
+// Push needs a secure context: https and http://localhost are, a plain-http LAN address is not.
 const local = new URL(state.webUrl);
-local.hostname = "localhost";
+if (local.protocol === "http:") local.hostname = "localhost";
 const localLogin = (p) => `${local.origin}/welcome#token=${p.ownerToken}`;
 const cli = `node ${join(root, "packages/cli/dist/hive.mjs")}`;
 const readme = `# hive 演示环境
@@ -187,7 +187,7 @@ claude mcp add hive -e HIVE_HOME=${join(demo, "buyer")} -- ${cli} mcp
 ## 通知：人不在网页上也能收到
 
 - **消息**：每个页面右上角的铃铛，红点是未读数；点开是全部消息，点一条进订单
-- **系统通知（Web Push）**：在电脑 Chrome 里用 localhost 打开（局域网地址是 http，不算安全环境，收不到推送，手机上只有铃铛）：
+- **系统通知（Web Push）**：要 https 或 localhost 才能开（本地演示时局域网地址是 http，不算安全环境，收不到推送，手机上只有铃铛）。用这两个链接打开：
   - 买家「小王」：${localLogin(state.buyer)}
   - 卖家「我的小店」：${localLogin(state.shop)}
 
