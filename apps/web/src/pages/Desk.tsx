@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { ApiError, hive, type Listing, type OrderSummary } from "../api.ts";
 import { allCategories, category as categoryOf, mmss, specText, STATUS_LABEL, typeTitle, yuan } from "../format.ts";
-import { AgentIcon, TabBar, TypeTile, useAction, useNow, usePoll, useSession, useToast } from "../ui.tsx";
+import { AgentIcon, Bell, TabBar, TypeTile, useAction, useNow, usePoll, useSession, useToast } from "../ui.tsx";
 
 const sleep = (ms: number, signal: AbortSignal) =>
   new Promise<void>((resolve) => {
@@ -199,6 +199,7 @@ export function Desk() {
     <>
       <div className="page">
         <div className="desk-head" style={{ paddingTop: "calc(16px + env(safe-area-inset-top, 0px))" }}>
+          <Bell corner />
           <button className={`desk-toggle${online ? " on" : ""}`} type="button" onClick={toggle} disabled={busy || (!online && !canAccept)}>
             <span>{online ? "接单中" : "开始接单"}<small>{online ? `已开 ${minutes} 分钟 · 关掉页面也在接` : "像出车一样上线"}</small></span>
           </button>

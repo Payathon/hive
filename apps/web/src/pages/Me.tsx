@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { hive, type AgentGrant } from "../api.ts";
 import { shortDate, typeTitle, yuan } from "../format.ts";
-import { AgentIcon, Switch, TabBar, useAction, usePoll, useSession, useToast } from "../ui.tsx";
+import { disablePush, enablePush, pushState, type PushState } from "../push.ts";
+import { AgentIcon, Bell, Switch, TabBar, useAction, usePoll, useSession, useToast } from "../ui.tsx";
 
 const toFen = (s: string) => (s.trim() === "" ? null : Math.round(Number(s) * 100));
 const toYuan = (fen: number | null) => (fen === null ? "" : String(fen / 100));
@@ -44,6 +45,63 @@ function Rules() {
         <input id="daily" type="number" min={0} step="0.01" inputMode="decimal" value={daily} onChange={(e) => setDaily(e.target.value)} />
       </div>
       <button className="btn line" type="submit" disabled={busy}>保存上限</button>
+    </form>
+  );
+}
+
+const PUSH_HINT: Record<PushState, string> = {
+  on: "已开启：关掉页面，订单要你处理时也会在系统通知里弹出",
+  off: "开启后，关掉页面也能收到付款、验收、派单提醒",
+  denied: "浏览器拒绝了通知：点地址栏左侧的图标，把「通知」改成允许后刷新",
+  unsupported: "这个地址收不到推送（需要 https 或 localhost）。在电脑上用 http://localhost:5173 打开就能开",
+  unavailable: "服务端没有开启推送",
+};
+
+// How hive reaches the owner when the page isn't open: browser push and mail. The 消息 bell covers the rest.
+function Notify() {
+  const { me, refresh } = useSession();
+  const { busy, run } = useAction();
+  const toast = useToast();
+  const [push, setPush] = useState<PushState | null>(null);
+  const [email, setEmail] = useState(me.email ?? "");
+
+  useEffect(() => {
+    pushState().then(setPush, () => setPush("unavailable"));
+  }, []);
+
+  async function toggle(on: boolean) {
+    const next = await run(() => (on ? enablePush() : disablePush()));
+    if (!next) return;
+    setPush(next);
+    if (on && next === "on") toast("通知已开启");
+  }
+  async function test() {
+    if (await run(() => hive.pushTest())) toast("已发送，看看系统通知");
+  }
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    if (await run(() => hive.setEmail(email.trim() || null))) {
+      toast(email.trim() ? "已保存，订单要你处理时会发邮件" : "已清除邮箱");
+      await refresh();
+    }
+  }
+
+  return (
+    <form className="card" onSubmit={save}>
+      <h4><span>通知</span><small>订单要你处理时提醒你</small></h4>
+      <div className="list-row">
+        <div className="tx">
+          <b>开启通知</b>
+          <small>{push ? PUSH_HINT[push] : "检查中…"}</small>
+          {push === "on" && <button className="link blue" type="button" style={{ padding: "4px 0 0" }} disabled={busy} onClick={test}>发一条试试</button>}
+        </div>
+        <Switch on={push === "on"} onChange={toggle} label="开启通知" disabled={busy || !push || push === "unsupported" || push === "unavailable" || push === "denied"} />
+      </div>
+      <div className="field" style={{ borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+        <label htmlFor="email">邮件通知（不填就不发）</label>
+        <input id="email" type="email" inputMode="email" autoComplete="email" placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+      </div>
+      <button className="btn line" type="submit" disabled={busy || email.trim() === (me.email ?? "")}>保存邮箱</button>
     </form>
   );
 }
@@ -134,6 +192,7 @@ export function MePage() {
     <>
       <div className="page">
         <div className="bill-head" style={{ paddingTop: "calc(24px + env(safe-area-inset-top, 0px))" }}>
+          <Bell corner />
           <span className="type-tile" style={{ background: "var(--blue)", borderRadius: "50%", fontSize: 18 }}>{me.name.slice(0, 1)}</span>
           <div className="amt" style={{ fontSize: 22 }}>{me.name}</div>
           <div className="status tone-mute"><small className="tnum">{me.id}</small></div>
@@ -160,6 +219,7 @@ export function MePage() {
             ))}
         </div>
 
+        <Notify />
         <Rules />
         <Agents grants={grants ?? []} reload={reloadGrants} />
         <div className="card" style={{ padding: 0 }}>

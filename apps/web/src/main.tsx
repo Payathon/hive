@@ -6,11 +6,13 @@ import { setCategories } from "./format.ts";
 import { Approve } from "./pages/Approve.tsx";
 import { Buy } from "./pages/Buy.tsx";
 import { Desk } from "./pages/Desk.tsx";
+import { Inbox } from "./pages/Inbox.tsx";
 import { Market } from "./pages/Market.tsx";
 import { MePage } from "./pages/Me.tsx";
 import { OrderPage } from "./pages/Order.tsx";
 import { Orders } from "./pages/Orders.tsx";
 import { Welcome } from "./pages/Welcome.tsx";
+import { registerServiceWorker, syncPush } from "./push.ts";
 import { isUnauthorized, SessionProvider, ToastHost } from "./ui.tsx";
 import "./styles.css";
 
@@ -33,6 +35,7 @@ function SignedIn() {
         return;
       }
       setMe(m);
+      void syncPush();
     } catch (err) {
       if (isUnauthorized(err)) {
         setToken(null);
@@ -62,12 +65,16 @@ function SignedIn() {
         <Route path="/buy/:category" element={<Buy />} />
         <Route path="/desk" element={<Desk />} />
         <Route path="/me" element={<MePage />} />
+        <Route path="/inbox" element={<Inbox />} />
         <Route path="/approve" element={<Approve />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </SessionProvider>
   );
 }
+
+// Only for Web Push; see public/sw.js.
+registerServiceWorker();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

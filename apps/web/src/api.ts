@@ -45,6 +45,17 @@ export interface Me {
   actor: "human" | "agent";
   rules: { perOrderCapFen: number | null; dailyCapFen: number | null; paused: boolean };
   humanAccepting: boolean;
+  email: string | null;
+}
+
+// One line in the 消息 inbox; every one points at an order.
+export interface Notice {
+  id: number;
+  kind: string;
+  orderId: string | null;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
 }
 
 export interface PendingLogin {
@@ -126,6 +137,14 @@ export const hive = {
     opts: { acceptMode: "auto" | "ask"; deliveryHours: number; dailyLimit: number; tags: string[]; intro: string | null },
   ) => req<Listing>("PUT", `/v1/listings/${category}`, { ...opts, workMode: "manual" }),
   paymentSetup: (category: string) => req<PaymentSetup>("POST", `/v1/listings/${category}/payment-setup`, {}),
+  setEmail: (email: string | null) => req<{ email: string | null }>("PATCH", "/v1/me", { email }),
+  notifications: () => req<Notice[]>("GET", "/v1/notifications"),
+  markRead: (id: number) => req<{ ok: true }>("POST", `/v1/notifications/${id}/read`, {}),
+  markAllRead: () => req<{ ok: true }>("POST", "/v1/notifications/read-all", {}),
+  pushKey: () => req<{ publicKey: string | null }>("GET", "/v1/push/key"),
+  pushSubscribe: (sub: { endpoint: string; keys: { p256dh: string; auth: string } }) => req<{ ok: true }>("POST", "/v1/push/subscribe", sub),
+  pushUnsubscribe: (endpoint: string) => req<{ ok: true }>("POST", "/v1/push/unsubscribe", { endpoint }),
+  pushTest: () => req<{ sent: number }>("POST", "/v1/push/test", {}),
   setAccepting: (on: boolean) => req<{ accepting: boolean }>("POST", "/v1/seller/accepting", { on }),
   // Long-poll as the human 接单台 (not as a `hive serve` listener).
   poll: (waitSeconds: number, signal: AbortSignal) =>

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { NavLink, useNavigate } from "react-router";
+import { Link, NavLink, useNavigate } from "react-router";
 import { ApiError, errorMessage, hive, type Me } from "./api.ts";
 import { typeIcon, type Step } from "./format.ts";
 
@@ -107,10 +107,10 @@ export const isUnauthorized = (err: unknown) => err instanceof ApiError && err.s
 
 // ---- chrome -----------------------------------------------------------
 
-export function NavBar({ title, right }: { title: string; right?: ReactNode }) {
+export function NavBar({ title, right, wide }: { title: string; right?: ReactNode; wide?: boolean }) {
   const navigate = useNavigate();
   return (
-    <header className="navbar">
+    <header className={`navbar${wide ? " wide" : ""}`}>
       <button type="button" aria-label="返回" onClick={() => (history.length > 1 ? navigate(-1) : navigate("/"))}>‹</button>
       <b>{title}</b>
       <span>{right}</span>
@@ -155,6 +155,19 @@ export function TabBar() {
         </NavLink>
       ))}
     </nav>
+  );
+}
+
+// The 消息 bell: unread notifications for this account, polled like the rest of the app.
+export function Bell({ corner }: { corner?: boolean }) {
+  const { data: unread } = usePoll(async () => (await hive.notifications()).filter((n) => !n.readAt).length, 5000);
+  return (
+    <Link to="/inbox" className={`bell${corner ? " corner" : ""}`} aria-label={unread ? `消息，${unread} 条未读` : "消息"}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+        <path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5a2 2 0 0 0 4 0" />
+      </svg>
+      {unread ? <span className="badge">{unread > 99 ? "99+" : unread}</span> : null}
+    </Link>
   );
 }
 

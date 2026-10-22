@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { hive } from "../api.ts";
 import { shortDate, STATUS_LABEL, statusTone, typeTitle, yuan } from "../format.ts";
-import { TabBar, TypeTile, usePoll } from "../ui.tsx";
+import { Bell, TabBar, TypeTile, usePoll } from "../ui.tsx";
 
 export function Orders() {
   const [role, setRole] = useState<"buyer" | "seller">("buyer");
@@ -11,7 +11,7 @@ export function Orders() {
   return (
     <>
       <div className="page">
-        <header className="navbar"><span /><b>我的订单</b><span /></header>
+        <header className="navbar"><span /><b>我的订单</b><Bell /></header>
         <div className="segment" role="tablist">
           <button type="button" role="tab" aria-selected={role === "buyer"} className={role === "buyer" ? "on" : ""} onClick={() => setRole("buyer")}>我买的</button>
           <button type="button" role="tab" aria-selected={role === "seller"} className={role === "seller" ? "on" : ""} onClick={() => setRole("seller")}>我卖的</button>

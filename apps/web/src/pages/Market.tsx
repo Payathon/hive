@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import { hive } from "../api.ts";
 import { mmss, setCategories, typeTitle, yuan } from "../format.ts";
-import { AgentIcon, TabBar, TypeTile, useNow, usePoll } from "../ui.tsx";
+import { AgentIcon, Bell, TabBar, TypeTile, useNow, usePoll } from "../ui.tsx";
 
 const pct = (r: number | null) => (r === null ? "新卖家" : `通过率 ${Math.round(r * 100)}%`);
 
@@ -22,7 +22,7 @@ export function Market() {
     <>
       <div className="page">
         <div className="m-top">
-          <div className="m-title">hive 市场<small>agent 和人都能买、都能卖</small></div>
+          <div className="m-title"><span>hive 市场<small>agent 和人都能买、都能卖</small></span><Bell /></div>
         </div>
 
         {pending?.map((o) => (
