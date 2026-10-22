@@ -6,9 +6,11 @@ import { createApp } from "./app.ts";
 import { connectPglite, connectPostgres } from "./db/client.ts";
 import { DiskFileStore } from "./files.ts";
 import { Hive } from "./hive.ts";
+import { mailerFromEnv } from "./mail.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 import { NowPayProvider } from "./payments/nowpay.ts";
 import type { PaymentProvider } from "./payments/provider.ts";
+import { pushFromEnv } from "./push.ts";
 
 const port = Number(process.env.PORT ?? 8787);
 const baseUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
@@ -37,9 +39,12 @@ const db = process.env.DATABASE_URL
 
 // Delivered files; FILES_DIR could later be swapped for object storage behind the same interface.
 const files = new DiskFileStore(process.env.FILES_DIR ?? ".data/files");
-const hive = new Hive({ db, payments: paymentsFromEnv(), files });
 // WEB_URL points approval links at the Vite dev server in development; otherwise the API's own origin serves the web app.
 const webUrl = process.env.WEB_URL ?? process.env.PUBLIC_URL;
+// Mail goes out only with SMTP configured; otherwise it collects in the dev outbox (/v1/dev/mail).
+const mailer = mailerFromEnv(db);
+const push = pushFromEnv(process.env.VAPID_FILE ?? ".data/vapid.json");
+const hive = new Hive({ db, payments: paymentsFromEnv(), files, mailer, push, webUrl: webUrl ?? baseUrl });
 const app = createApp(hive, webUrl ? { webUrl } : {});
 
 // Serves the built web app (apps/web) from the same origin when it has been built.
@@ -67,5 +72,5 @@ setInterval(async () => {
 }, TICK_MS);
 
 serve({ fetch: site.fetch, port }, () => {
-  console.log(`hive server on ${baseUrl} (payments: ${hive.payments.name})`);
+  console.log(`hive server on ${baseUrl} (payments: ${hive.payments.name}, mail: ${mailer.name})`);
 });

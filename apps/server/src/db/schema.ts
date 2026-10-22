@@ -26,6 +26,8 @@ export const accounts = pgTable("accounts", {
   activeAt: ts("active_at"),
   // Fully automatic presence: the `hive serve` listener's last poll.
   listenerSeenAt: ts("listener_seen_at"),
+  // Where order notifications are mailed; optional.
+  email: text("email"),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
@@ -210,3 +212,27 @@ export const notifications = pgTable(
   },
   (t) => [index("notifications_account").on(t.accountId, t.id)],
 );
+
+// Web Push endpoints of the owner's browsers. A browser belongs to whoever subscribed from it last.
+export const pushSubscriptions = pgTable(
+  "push_subscriptions",
+  {
+    endpoint: text("endpoint").primaryKey(),
+    accountId: text("account_id")
+      .notNull()
+      .references(() => accounts.id),
+    p256dh: text("p256dh").notNull(),
+    auth: text("auth").notNull(),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [index("push_subscriptions_account").on(t.accountId)],
+);
+
+// Mail that would have been sent when no SMTP server is configured; shown at /v1/dev/mail.
+export const devMail = pgTable("dev_mail", {
+  id: serial("id").primaryKey(),
+  to: text("to").notNull(),
+  subject: text("subject").notNull(),
+  text: text("text").notNull(),
+  createdAt: ts("created_at").notNull().defaultNow(),
+});

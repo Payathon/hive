@@ -4,6 +4,7 @@ import { z } from "zod";
 import { HiveClient } from "@hive/client/api";
 import { createMcpServer } from "@hive/client/mcp";
 import { Hive, HiveError, MAX_FILE_BYTES, type Principal } from "./hive.ts";
+import { OutboxMailer } from "./mail.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 
 type Env = { Variables: { principal: Principal } };
@@ -136,7 +137,15 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
       actor: me(c).actor,
       rules: { perOrderCapFen: a.perOrderCapFen, dailyCapFen: a.dailyCapFen, paused: a.paused },
       humanAccepting: a.humanAccepting,
+      email: a.email,
     });
+  });
+
+  // Account settings the owner edits on 我的; for now only where notifications are mailed.
+  authed.patch("/me", async (c) => {
+    const { email } = await body(c, z.object({ email: z.email().max(254).nullable() }));
+    const a = await hive.setEmail(me(c), email);
+    return c.json({ email: a.email });
   });
 
   authed.patch("/me/rules", async (c) => {
@@ -245,10 +254,31 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
   authed.get("/notifications", async (c) =>
     c.json(await hive.listNotifications(me(c), Number(c.req.query("after") ?? 0) || 0)),
   );
+  authed.post("/notifications/read-all", async (c) => {
+    await hive.markAllNotificationsRead(me(c));
+    return c.json({ ok: true });
+  });
   authed.post("/notifications/:id/read", async (c) => {
     await hive.markNotificationRead(me(c), Number(c.req.param("id")));
     return c.json({ ok: true });
   });
+
+  // Web Push: the browser subscribes with this server's VAPID key, then gets notifications with the tab closed.
+  authed.get("/push/key", (c) => c.json({ publicKey: hive.push?.publicKey ?? null }));
+  authed.post("/push/subscribe", async (c) => {
+    const target = await body(
+      c,
+      z.object({ endpoint: z.url().max(2048), keys: z.object({ p256dh: z.string().max(256), auth: z.string().max(256) }) }),
+    );
+    await hive.subscribePush(me(c), target);
+    return c.json({ ok: true });
+  });
+  authed.post("/push/unsubscribe", async (c) => {
+    const { endpoint } = await body(c, z.object({ endpoint: z.string() }));
+    await hive.unsubscribePush(me(c), endpoint);
+    return c.json({ ok: true });
+  });
+  authed.post("/push/test", async (c) => c.json(await hive.testPush(me(c))));
 
   // ---- dev: simulate the buyer confirming in Alipay ---------------------
   // Registered before the authed routes so the /v1 auth middleware doesn't catch them.
@@ -276,6 +306,30 @@ button:disabled{opacity:.5}#done{display:none;color:#00b578;font-size:18px;margi
 </body></html>`);
     });
     app.post("/v1/dev/fake-pay/:requestNo", pay);
+
+    // The dev outbox: mail hive would have sent, newest first, like a mailcatcher. Refreshes itself.
+    const outbox = hive.mailer;
+    if (outbox instanceof OutboxMailer) {
+      app.get("/v1/dev/mail", async (c) => {
+        const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => `&#${ch.charCodeAt(0)};`);
+        const linked = (s: string) => esc(s).replace(/https?:\/\/[^\s<]+/g, (u) => `<a href="${u}">${u}</a>`);
+        const mails = await outbox.list();
+        const items = mails
+          .map(
+            (m) => `<div class="m"><div class="h"><b>${esc(m.subject)}</b><span>${m.createdAt.toLocaleString("zh-CN", { timeZone: "Asia/Shanghai" })}</span></div>
+<div class="to">收件人：${esc(m.to)}</div><pre>${linked(m.text)}</pre></div>`,
+          )
+          .join("\n");
+        return c.html(`<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="5"><title>hive 邮件（测试收件箱）</title><style>body{margin:0;font-family:system-ui,-apple-system,sans-serif;background:#f5f5f5;color:#222}
+.top{background:#1677ff;color:#fff;padding:16px;font-size:17px;font-weight:600}.top small{display:block;font-weight:400;font-size:12px;opacity:.85;margin-top:4px}
+.m{background:#fff;margin:12px;border-radius:10px;padding:14px}.h{display:flex;justify-content:space-between;gap:12px}.h span,.to{color:#8c8c8c;font-size:12px}
+pre{white-space:pre-wrap;font:inherit;font-size:14px;margin:10px 0 0}a{color:#1677ff}.empty{text-align:center;color:#8c8c8c;padding:40px}</style></head><body>
+<div class="top">hive 邮件 · 测试收件箱<small>没有配置 SMTP，邮件不会真的发出，都在这里。每 5 秒刷新</small></div>
+${items || '<div class="empty">还没有邮件。在「我的」里填上邮箱，订单要你处理时会出现在这里</div>'}
+</body></html>`);
+      });
+    }
   }
 
   app.route("/v1", authed);

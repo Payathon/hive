@@ -21,10 +21,12 @@ import {
   type WorkMode,
 } from "@hive/core";
 import type { Db } from "./db/client.ts";
-import { accounts, categories, deviceLogins, files, listings, notifications, orderEvents, orders, tokens } from "./db/schema.ts";
+import { accounts, categories, deviceLogins, files, listings, notifications, orderEvents, orders, pushSubscriptions, tokens } from "./db/schema.ts";
 import { MemoryFileStore, type FileStore } from "./files.ts";
+import { OutboxMailer, type Mailer } from "./mail.ts";
 import { lockOrder, orderColumns, rowToOrder, saveTransition, type OrderRow } from "./orders-repo.ts";
 import type { PaymentProvider, ProductRef } from "./payments/provider.ts";
+import type { PushMessage, PushSender, PushTarget } from "./push.ts";
 
 export type Actor = "human" | "agent";
 export interface Principal {
@@ -79,7 +81,27 @@ export interface HiveOptions {
   payments: PaymentProvider;
   files?: FileStore;
   clock?: () => Date;
+  // Notifications beyond the in-app inbox (design §6). Mail defaults to the dev outbox; no push unless given.
+  mailer?: Mailer;
+  push?: PushSender | null;
+  // Where the web app lives, for links in mail.
+  webUrl?: string;
 }
+
+// Headline per notification kind, for push and mail.
+const NOTICE_TITLE: Record<string, string> = {
+  offer: "新派单，等你抢单",
+  payment_required: "待你付款",
+  paid: "买家已付款",
+  delivered: "已交付，等你验收",
+  failed: "订单失败",
+  completed: "订单完成",
+  cancelled: "订单已取消",
+};
+// People read these in push and mail, so reasons are spelled out (same words as the web order page).
+const FAIL_TEXT: Record<string, string> = { work_timeout: "卖家没有按时交付", seller_abandoned: "卖家放弃了这单", heartbeat_lost: "卖家的 agent 掉线了" };
+const CANCEL_TEXT: Record<string, string> = { no_seller: "暂时没有卖家接单，没有扣款", buyer_cancelled: "已取消，没有扣款", payment_expired: "超时未付款" };
+const VERDICT_TEXT: Record<string, string> = { accepted: "买家已确认收货", rejected: "买家拒收了", auto_accepted: "超时自动确认收货" };
 
 type CategoryRow = typeof categories.$inferSelect;
 
@@ -102,7 +124,12 @@ export class Hive {
   readonly db: Db;
   readonly payments: PaymentProvider;
   readonly files: FileStore;
+  readonly mailer: Mailer;
+  readonly push: PushSender | null;
+  private readonly webUrl: string;
   private readonly clock: () => Date;
+  // Push and mail in flight; they never hold up or fail the order change that caused them.
+  private readonly outgoing = new Set<Promise<void>>();
   private categoryCache: { at: number; list: CategoryRow[] } | null = null;
   // Wakes long-polls for an account when something it cares about changes.
   private readonly bus = new EventEmitter().setMaxListeners(0);
@@ -111,6 +138,9 @@ export class Hive {
     this.db = opts.db;
     this.payments = opts.payments;
     this.files = opts.files ?? new MemoryFileStore();
+    this.mailer = opts.mailer ?? new OutboxMailer(opts.db);
+    this.push = opts.push ?? null;
+    this.webUrl = (opts.webUrl ?? "http://localhost:5173").replace(/\/$/, "");
     this.clock = opts.clock ?? (() => new Date());
   }
 
@@ -240,7 +270,11 @@ export class Hive {
     return this.getAccount(p.accountId);
   }
 
-  // ---- listings ---------------------------------------------------------
+  async setEmail(p: Principal, email: string | null) {
+    if (p.actor !== "human") throw new HiveError(403, "humans_only", "only the account owner can change the email");
+    await this.db.update(accounts).set({ email }).where(eq(accounts.id, p.accountId));
+    return this.getAccount(p.accountId);
+  }
 
   // ---- categories -------------------------------------------------------
 
@@ -672,6 +706,61 @@ export class Hive {
       .where(and(eq(notifications.id, id), eq(notifications.accountId, p.accountId)));
   }
 
+  async markAllNotificationsRead(p: Principal) {
+    await this.db
+      .update(notifications)
+      .set({ readAt: this.now() })
+      .where(and(eq(notifications.accountId, p.accountId), isNull(notifications.readAt)));
+  }
+
+  // ---- web push ---------------------------------------------------------
+
+  async subscribePush(p: Principal, target: PushTarget) {
+    if (p.actor !== "human") throw new HiveError(403, "humans_only", "only the account owner can turn on notifications");
+    if (!this.push) throw new HiveError(409, "push_disabled", "web push is not configured on this server");
+    const values = { accountId: p.accountId, p256dh: target.keys.p256dh, auth: target.keys.auth };
+    await this.db
+      .insert(pushSubscriptions)
+      .values({ endpoint: target.endpoint, ...values })
+      .onConflictDoUpdate({ target: pushSubscriptions.endpoint, set: values });
+  }
+
+  async unsubscribePush(p: Principal, endpoint: string) {
+    await this.db
+      .delete(pushSubscriptions)
+      .where(and(eq(pushSubscriptions.endpoint, endpoint), eq(pushSubscriptions.accountId, p.accountId)));
+  }
+
+  // The 我的 page's "发一条试试": proves the browser receives push without placing an order.
+  async testPush(p: Principal) {
+    const sent = await this.pushTo(p.accountId, { title: "hive 通知已开启", body: "订单要你处理时会这样提醒你", url: "/me", tag: "test" });
+    if (sent === 0) throw new HiveError(409, "no_subscription", "this account has no browser subscribed to notifications");
+    return { sent };
+  }
+
+  // Sends to every browser the account subscribed; drops subscriptions the push service says are gone.
+  private async pushTo(accountId: string, message: PushMessage) {
+    if (!this.push) return 0;
+    const subs = await this.db.select().from(pushSubscriptions).where(eq(pushSubscriptions.accountId, accountId));
+    let sent = 0;
+    for (const sub of subs) {
+      try {
+        await this.push.send({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, message);
+        sent++;
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode;
+        if (status === 404 || status === 410) await this.db.delete(pushSubscriptions).where(eq(pushSubscriptions.endpoint, sub.endpoint));
+        else console.error("push failed", status ?? err);
+      }
+    }
+    return sent;
+  }
+
+  // Waits for push and mail in flight; tests use it, the server never needs to.
+  async settle() {
+    while (this.outgoing.size) await Promise.all(this.outgoing);
+  }
+
   // ---- background sweep -------------------------------------------------
 
   // Applies expired deadlines, retries dispatch, polls for payment and detects lost listeners.
@@ -879,9 +968,29 @@ export class Hive {
     await this.apply(id, { type: "payment_confirmed", paymentRef: row.purchaseRequestNo ?? id }, { paidAt: this.now() });
   }
 
-  private async notify(accountId: string, kind: string, orderId: string, body: string) {
+  // Every notification goes to the in-app inbox; `reach` also sends it by push and mail to the
+  // person, off the request path so a slow or broken channel never affects the order.
+  private async notify(accountId: string, kind: string, orderId: string, body: string, reach = true) {
     await this.db.insert(notifications).values({ accountId, kind, orderId, body, createdAt: this.now() });
     this.bus.emit(accountId);
+    if (!reach) return;
+    const job = this.reach(accountId, kind, orderId, body)
+      .catch((err) => console.error("notification delivery failed", err))
+      .finally(() => this.outgoing.delete(job));
+    this.outgoing.add(job);
+  }
+
+  private async reach(accountId: string, kind: string, orderId: string, body: string) {
+    const title = NOTICE_TITLE[kind] ?? "hive 订单更新";
+    const path = `/orders/${orderId}`;
+    const { email } = await this.getAccount(accountId);
+    await Promise.all([
+      this.pushTo(accountId, { title, body, url: path, tag: `${orderId}:${kind}` }),
+      email &&
+        this.mailer
+          .send({ to: email, subject: `hive：${title}`, text: `${body}\n\n查看订单：${this.webUrl}${path}\n\n—— hive` })
+          .catch((err) => console.error("mail failed", err)),
+    ]);
   }
 
   private async announce(row: OrderRow, event: OrderEvent) {
@@ -889,6 +998,9 @@ export class Hive {
     const price = row.priceFen === null ? "" : `${(row.priceFen / 100).toFixed(2)} 元`;
     const buyer = row.buyerAccountId;
     const seller = row.sellerAccountId;
+    // A fully automatic seller's person isn't pinged for routine steps their agent handles; only failures.
+    const listing = row.listingId ? await this.listingFor(row) : null;
+    const sellerReach = !(listing?.acceptMode === "auto" && listing.workMode === "agent");
     switch (event.type) {
       case "offer":
         for (const s of event.sellerAccountIds) {
@@ -900,22 +1012,22 @@ export class Hive {
         await this.notify(buyer, "payment_required", row.id, `请在支付宝确认付款：${title} ${price}`);
         break;
       case "payment_confirmed":
-        if (seller) await this.notify(seller, "paid", row.id, `买家已付款，可以开始：${title} ${price}`);
+        if (seller) await this.notify(seller, "paid", row.id, `买家已付款，可以开始：${title} ${price}`, sellerReach);
         break;
       case "delivery_submitted":
         if (row.status === "DELIVERED") await this.notify(buyer, "delivered", row.id, `已交付，请验收：${title}`);
         break;
       case "work_failed":
-        await this.notify(buyer, "failed", row.id, `订单失败（${event.reason}）：${title}`);
-        if (seller) await this.notify(seller, "failed", row.id, `订单失败（${event.reason}）：${title}`);
+        await this.notify(buyer, "failed", row.id, `${title}：${FAIL_TEXT[event.reason] ?? event.reason}`);
+        if (seller) await this.notify(seller, "failed", row.id, `${title}：${FAIL_TEXT[event.reason] ?? event.reason}`);
         break;
       case "buyer_verdict":
       case "acceptance_expired":
-        if (seller) await this.notify(seller, "completed", row.id, `订单完成（${row.verdict}）：${title}`);
+        if (seller) await this.notify(seller, "completed", row.id, `${title}：${VERDICT_TEXT[row.verdict ?? ""] ?? "订单完成"}`, sellerReach);
         break;
       case "no_candidates":
       case "payment_expired":
-        await this.notify(buyer, "cancelled", row.id, `订单已取消（${row.cancelReason}）：${title}`);
+        await this.notify(buyer, "cancelled", row.id, `${title}：${CANCEL_TEXT[row.cancelReason ?? ""] ?? "订单已取消"}`);
         break;
       default:
         break;
