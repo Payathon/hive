@@ -10,7 +10,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const state = JSON.parse(readFileSync(join(root, ".demo/state.json"), "utf8"));
+const state = JSON.parse(readFileSync(join(process.env.HIVE_DEMO_DIR ? resolve(process.env.HIVE_DEMO_DIR) : join(root, ".demo"), "state.json"), "utf8"));
 const server = state.server;
 const keep = process.argv.includes("--keep");
 const buyer = state.buyer.agentToken; // orders come from the buyer's agent, as in real use

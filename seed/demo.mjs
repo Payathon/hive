@@ -3,13 +3,13 @@
 //   「hive 工作室」   a fully automatic seller: seed agents and Claude Code, accept: auto
 //   「我的小店」      a seller you play: one listing approved-then-agent, two done by hand
 // Usage (repo root, server running):  node seed/demo.mjs [--reset]
-// Everything lands in .demo/ (git-ignored); .demo/README.md has the links and commands.
+// Everything lands in .demo/ (git-ignored, HIVE_DEMO_DIR overrides); .demo/README.md has the links and commands.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const demo = join(root, ".demo");
+const demo = process.env.HIVE_DEMO_DIR ? resolve(process.env.HIVE_DEMO_DIR) : join(root, ".demo");
 const server = process.env.HIVE_SERVER ?? "http://localhost:8787";
 const statePath = join(demo, "state.json");
 
@@ -118,7 +118,19 @@ if (!state) {
   writeFileSync(statePath, JSON.stringify(state, null, 2) + "\n", { mode: 0o600 });
 }
 
+// Fake addresses: without SMTP, mail only reaches the dev outbox. Set every run so older .demo/ worlds get them too.
+const emails = { buyer: "buyer@hive.demo", studio: "studio@hive.demo", shop: "shop@hive.demo" };
+try {
+  for (const [key, email] of Object.entries(emails)) await call("PATCH", "/v1/me", state[key].ownerToken, { email });
+} catch {
+  console.warn("this server predates email notifications; restart it to get them");
+}
+
 const login = (p) => `${state.webUrl}/welcome#token=${p.ownerToken}`;
+// Push needs a secure context: http://localhost is one, the LAN address is not.
+const local = new URL(state.webUrl);
+local.hostname = "localhost";
+const localLogin = (p) => `${local.origin}/welcome#token=${p.ownerToken}`;
 const cli = `node ${join(root, "packages/cli/dist/hive.mjs")}`;
 const readme = `# hive 演示环境
 
@@ -162,7 +174,19 @@ claude mcp add hive -e HIVE_HOME=${join(demo, "buyer")} -- ${cli} mcp
 | 人工（线下） | 实地拍照 \`onsite.photo\`，要 3 张图片 | 你抢单，付款后在订单页拍照上传交付 |
 | 人工（自动接单） | 图片设计 \`design.image\` | 平台直接替小店接单；你在网页上传，或让你的 agent 用 \`hive_deliver\` 交付 |
 
-付款是假支付：订单页点「去支付宝付款」，或者打开 agent 给的链接点「确认付款」，就算付过了。\n\n验证全部流程：\`node seed/e2e.mjs\`（加 \`--keep\` 会留着最后的交付不验收，方便在网页上看）。
+付款是假支付：订单页点「去支付宝付款」，或者打开 agent 给的链接点「确认付款」，就算付过了。
+
+## 通知：人不在网页上也能收到
+
+- **消息**：每个页面右上角的铃铛，红点是未读数；点开是全部消息，点一条进订单
+- **系统通知（Web Push）**：在电脑 Chrome 里用 localhost 打开（局域网地址是 http，不算安全环境，收不到推送，手机上只有铃铛）：
+  - 买家「小王」：${localLogin(state.buyer)}
+  - 卖家「我的小店」：${localLogin(state.shop)}
+
+  进「我的 → 通知 → 开启通知」，允许浏览器通知，点「发一条试试」确认能弹出。然后关掉标签页（Chrome 别退出），让 agent 下单：要付款、已交付（买家），新派单、买家已付款（小店）都会弹系统通知，点通知直接打开订单。全自动的「hive 工作室」只在出错时提醒
+- **邮件**：三个账号已填测试邮箱（${Object.values(emails).join("、")}），可以在「我的」里改。没配 SMTP 时邮件不会真的发出，都在测试收件箱 ${state.server}/v1/dev/mail（每 5 秒刷新）；给服务端配 \`SMTP_URL\` 才真发
+
+验证全部流程：\`node seed/e2e.mjs\`（加 \`--keep\` 会留着最后的交付不验收，方便在网页上看）。
 `;
 writeFileSync(join(demo, "README.md"), readme);
 console.log(readme);
