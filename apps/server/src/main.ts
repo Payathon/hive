@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono } from "hono";
@@ -9,6 +9,7 @@ import { Hive } from "./hive.ts";
 import { mailerFromEnv } from "./mail.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 import { NowPayProvider } from "./payments/nowpay.ts";
+import { NowPayDirectProvider, type DirectProduct } from "./payments/nowpay-direct.ts";
 import type { PaymentProvider } from "./payments/provider.ts";
 import { pushFromEnv } from "./push.ts";
 
@@ -16,19 +17,39 @@ const port = Number(process.env.PORT ?? 8787);
 const baseUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
 const TICK_MS = Number(process.env.TICK_MS ?? 5000);
 
+// PAYMENTS=direct | platform | fake. Unset: direct when its credentials and product are present,
+// otherwise fake. Direct mode (即刻收直连) is the default for real money; platform mode is kept for later.
+// Key material may be given inline (ALIPAY_PRIVATE_KEY) or as a file (ALIPAY_PRIVATE_KEY_PATH).
+const env = (k: string) => process.env[k] || (process.env[`${k}_PATH`] ? readFileSync(process.env[`${k}_PATH`]!, "utf8").trim() : undefined);
+const directReady = () => Boolean(env("ALIPAY_APP_ID") && env("ALIPAY_PRIVATE_KEY") && env("ALIPAY_PUBLIC_KEY") && process.env.NOWPAY_DIRECT_PRODUCT_ID);
+
 function paymentsFromEnv(): PaymentProvider {
-  if (process.env.PAYMENTS !== "nowpay") return new FakePaymentProvider(baseUrl, undefined, process.env.FAKE_PAY_STATE ?? ".data/fake-pay.json");
+  const mode = process.env.PAYMENTS === "nowpay" ? "platform" : (process.env.PAYMENTS ?? (directReady() ? "direct" : "fake"));
+  if (mode === "fake") return new FakePaymentProvider(baseUrl, undefined, process.env.FAKE_PAY_STATE ?? ".data/fake-pay.json");
   const need = (k: string) => {
-    const v = process.env[k];
-    if (!v) throw new Error(`${k} is required when PAYMENTS=nowpay`);
+    const v = env(k);
+    if (!v) throw new Error(`${k} is required when PAYMENTS=${mode}`);
     return v;
   };
-  return new NowPayProvider({
+  const keys = {
     appId: need("ALIPAY_APP_ID"),
     privateKey: need("ALIPAY_PRIVATE_KEY"),
     alipayPublicKey: need("ALIPAY_PUBLIC_KEY"),
     ...(process.env.ALIPAY_GATEWAY ? { gateway: process.env.ALIPAY_GATEWAY } : {}),
-    callbackUrl: `${baseUrl}/nowpay/return`,
+  };
+  if (mode === "platform") return new NowPayProvider({ ...keys, callbackUrl: `${baseUrl}/nowpay/return` });
+  if (mode !== "direct") throw new Error(`PAYMENTS must be direct, platform or fake, not ${mode}`);
+  // NOWPAY_DIRECT_PRODUCTS: optional JSON {"<category>": "<product id>" | {"productId", "skuId"}}.
+  const byCategory: Record<string, DirectProduct> = {};
+  for (const [cat, v] of Object.entries(JSON.parse(process.env.NOWPAY_DIRECT_PRODUCTS ?? "{}") as Record<string, string | DirectProduct>)) {
+    byCategory[cat] = typeof v === "string" ? { productId: v } : v;
+  }
+  return new NowPayDirectProvider({
+    ...keys,
+    product: { productId: need("NOWPAY_DIRECT_PRODUCT_ID"), skuId: process.env.NOWPAY_DIRECT_SKU_ID || null },
+    byCategory,
+    // Buyers land back on hive after paying; ignored unless https (the docs require it).
+    callbackUrl: `${process.env.WEB_URL ?? process.env.PUBLIC_URL ?? baseUrl}/orders`,
   });
 }
 
@@ -44,7 +65,8 @@ const webUrl = process.env.WEB_URL ?? process.env.PUBLIC_URL;
 // Mail goes out only with SMTP configured; otherwise it collects in the dev outbox (/v1/dev/mail).
 const mailer = mailerFromEnv(db);
 const push = pushFromEnv(process.env.VAPID_FILE ?? ".data/vapid.json");
-const hive = new Hive({ db, payments: paymentsFromEnv(), files, mailer, push, webUrl: webUrl ?? baseUrl });
+const payments = paymentsFromEnv();
+const hive = new Hive({ db, payments, files, mailer, push, webUrl: webUrl ?? baseUrl });
 const app = createApp(hive, webUrl ? { webUrl } : {});
 
 // Serves the built web app (apps/web) from the same origin when it has been built.
@@ -56,6 +78,24 @@ if (existsSync(webDist)) {
   site.get("*", (c, next) =>
     c.req.path.startsWith("/v1/") || c.req.path === "/mcp" ? next() : serveStatic({ root: webDist, path: "index.html" })(c, next),
   );
+}
+
+// Direct mode: show what charge.query says about each configured product, then re-sync listings so
+// every listing carries the product's real status and price (e.g. after running on fake payments).
+if (payments instanceof NowPayDirectProvider) {
+  for (const product of payments.products()) {
+    try {
+      const s = await payments.queryProduct(product);
+      const price = s.priceFen === null ? "no 1-count tier" : `¥${(s.priceFen / 100).toFixed(2)} (sku ${s.skuId})`;
+      console.log(`即刻收直连 product ${product.productId}: ${s.status}, ${price}${s.note ? ` — ${s.note}` : ""}`);
+    } catch (err) {
+      console.error(`即刻收直连 product ${product.productId}: charge.query failed: ${(err as Error).message}`);
+    }
+  }
+  hive
+    .syncListingPayments()
+    .then((n) => console.log(`即刻收直连: ${n} listing(s) can take payment`))
+    .catch((err) => console.error(`即刻收直连: listing payment sync failed, listings keep their old status: ${(err as Error).message}`));
 }
 
 let ticking = false;

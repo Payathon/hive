@@ -89,6 +89,7 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
     if (!r) return;
     if (r.status === "ENABLED") toast(`已开通收款，标价 ¥${yuan(r.priceFen)}`);
     else if (r.configurationUrl) window.open(r.configurationUrl, "_blank", "noopener");
+    else if (r.note) toast(r.note);
     await reload();
   }
   async function add(e: React.FormEvent) {

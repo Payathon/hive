@@ -21,6 +21,8 @@ export class FakePaymentProvider implements PaymentProvider {
   private purchases = new Map<string, { productId: string; buyerId: string; completed: boolean }>();
   private quota = new Map<string, number>();
   private consumed = new Map<string, ConsumeStatus>();
+  // Like direct mode: every listing sells the same product, so buyers have one shared quota.
+  private sharedProductId: string | null = null;
 
   constructor(
     private readonly baseUrl: string,
@@ -42,6 +44,14 @@ export class FakePaymentProvider implements PaymentProvider {
     writeFileSync(this.statePath, JSON.stringify(state));
   }
 
+  shareProduct(productId: string | null) {
+    this.sharedProductId = productId;
+  }
+
+  quotaKey(product: ProductRef): string {
+    return this.sharedProductId ?? product.productId;
+  }
+
   setPrice(productId: string, priceFen: Fen) {
     this.prices.set(productId, priceFen);
   }
@@ -59,7 +69,7 @@ export class FakePaymentProvider implements PaymentProvider {
 
   async createPurchase(p: { requestNo: string; product: ProductRef; buyerId: string }): Promise<Purchase> {
     if (!this.purchases.has(p.requestNo)) {
-      this.purchases.set(p.requestNo, { productId: p.product.productId, buyerId: p.buyerId, completed: false });
+      this.purchases.set(p.requestNo, { productId: this.quotaKey(p.product), buyerId: p.buyerId, completed: false });
       this.save();
     }
     return {
@@ -83,13 +93,13 @@ export class FakePaymentProvider implements PaymentProvider {
   }
 
   async remainingQuota(p: { product: ProductRef; buyerId: string }): Promise<number> {
-    return this.quota.get(quotaKey(p.product.productId, p.buyerId)) ?? 0;
+    return this.quota.get(quotaKey(this.quotaKey(p.product), p.buyerId)) ?? 0;
   }
 
   async consume(p: { requestNo: string; product: ProductRef; buyerId: string }): Promise<ConsumeStatus> {
     const prior = this.consumed.get(p.requestNo);
     if (prior) return prior;
-    const k = quotaKey(p.product.productId, p.buyerId);
+    const k = quotaKey(this.quotaKey(p.product), p.buyerId);
     const left = this.quota.get(k) ?? 0;
     const status: ConsumeStatus = left >= 1 ? "SUCCEEDED" : "INSUFFICIENT";
     if (status === "SUCCEEDED") this.quota.set(k, left - 1);

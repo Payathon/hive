@@ -108,6 +108,8 @@ export interface PaymentSetup {
   priceFen: number | null;
   configurationUrl: string | null;
   managementUrl: string | null;
+  // Direct mode: hive's operator configures payment, so sellers get an explanation instead of a link.
+  note?: string | null;
 }
 
 const req = <T,>(method: string, path: string, body?: unknown, signal?: AbortSignal) =>

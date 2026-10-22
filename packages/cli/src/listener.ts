@@ -50,8 +50,12 @@ export class Listener {
         const hand = entry.run ? "" : `, by hand within ${listing.deliveryHours}h`;
         this.log(`listed ${entry.category} at ${yuan(pay.priceFen)} (${entry.accept}${hand})`);
       } else {
-        const next = pay.configurationUrl ?? pay.managementUrl ?? "(no link returned)";
-        this.log(`${entry.category}: 即刻收 status ${pay.status}, set a "1 次" price in Alipay: ${next}`);
+        if (pay.note && !pay.configurationUrl) {
+          this.log(`${entry.category}: 即刻收 status ${pay.status}: ${pay.note}`);
+        } else {
+          const next = pay.configurationUrl ?? pay.managementUrl ?? "(no link returned)";
+          this.log(`${entry.category}: 即刻收 status ${pay.status}, set a "1 次" price in Alipay: ${next}`);
+        }
       }
     }
   }

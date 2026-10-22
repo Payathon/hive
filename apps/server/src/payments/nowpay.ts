@@ -10,7 +10,7 @@ import {
   type Purchase,
 } from "./provider.ts";
 
-// Alipay Vibe Pay 即刻收, platform mode. Field names follow
+// Alipay Vibe Pay 即刻收, platform mode (the later option; direct mode is the default, see nowpay-direct.ts). Field names follow
 // https://aipay.alipay.com/docs/vibe-pay/nowpay/platform/platfrom-guide.md
 // Not yet exercised against the live gateway: hive still needs partner-platform access.
 
@@ -40,6 +40,15 @@ interface ChargingOption {
   quota_amount?: number;
 }
 
+// alipay-sdk assumes PKCS#1 unless told otherwise and mangles a PKCS#8 PEM header. Alipay's key
+// tool hands out bare base64 in either form; PKCS#8 carries the rsaEncryption OID right after the
+// version, which in base64 is the "ADANBgkqhkiG9w0BAQEFAAS" run near the start.
+export function privateKeyType(key: string): "PKCS1" | "PKCS8" {
+  if (key.includes("BEGIN PRIVATE KEY")) return "PKCS8";
+  if (key.includes("BEGIN RSA PRIVATE KEY")) return "PKCS1";
+  return key.replace(/\s/g, "").slice(0, 40).includes("ADANBgkqhkiG9w0BAQEFAAS") ? "PKCS8" : "PKCS1";
+}
+
 // "yyyy-MM-dd HH:mm:ss" in Asia/Shanghai (UTC+8, no DST).
 export function parseShanghaiTime(s: string): Date {
   return new Date(`${s.replace(" ", "T")}+08:00`);
@@ -53,13 +62,14 @@ export function singleCountOption(options: readonly ChargingOption[]): ChargingO
 }
 
 export class NowPayProvider implements PaymentProvider {
-  readonly name = "nowpay";
+  readonly name = "nowpay-platform";
   private sdk: AlipaySdk;
 
   constructor(private readonly config: NowPayConfig) {
     this.sdk = new AlipaySdk({
       appId: config.appId,
       privateKey: config.privateKey,
+      keyType: privateKeyType(config.privateKey),
       alipayPublicKey: config.alipayPublicKey,
       ...(config.gateway ? { gateway: config.gateway } : {}),
       camelcase: false,
@@ -70,6 +80,11 @@ export class NowPayProvider implements PaymentProvider {
     const result = await this.sdk.exec(method, { bizContent });
     if (result.code !== "10000") throw new NowPayError(method, result);
     return result;
+  }
+
+  // One product per listing.
+  quotaKey(product: ProductRef): string {
+    return product.productId;
   }
 
   async setupProduct(product: ProductRef): Promise<ChargeState> {

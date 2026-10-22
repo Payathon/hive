@@ -1,8 +1,8 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { NowPayError, NowPayProvider, parseShanghaiTime, singleCountOption } from "./nowpay.ts";
+import { NowPayError, NowPayProvider, parseShanghaiTime, privateKeyType, singleCountOption } from "./nowpay.ts";
 
-const product = { productId: "lst_1", ownerId: "acct_seller", productName: "hive · 竞品门店数据" };
+const product = { productId: "lst_1", ownerId: "acct_seller", category: "data.market", productName: "hive · 竞品门店数据" };
 
 function provider(responses: Record<string, Record<string, unknown>>) {
   const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
@@ -21,6 +21,15 @@ function provider(responses: Record<string, Record<string, unknown>>) {
   };
   return { p, calls };
 }
+
+it("tells PKCS#8 from PKCS#1 keys, with or without PEM armour", () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+  const pkcs8 = privateKey.export({ type: "pkcs8", format: "pem" }).toString();
+  const pkcs1 = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
+  const bare = (pem: string) => pem.split("\n").filter((l) => l && !l.startsWith("-----")).join("");
+  expect([privateKeyType(pkcs8), privateKeyType(bare(pkcs8))]).toEqual(["PKCS8", "PKCS8"]);
+  expect([privateKeyType(pkcs1), privateKeyType(bare(pkcs1))]).toEqual(["PKCS1", "PKCS1"]);
+});
 
 it("parses Asia/Shanghai gateway timestamps", () => {
   expect(parseShanghaiTime("2026-09-07 10:30:00").toISOString()).toBe("2026-09-07T02:30:00.000Z");

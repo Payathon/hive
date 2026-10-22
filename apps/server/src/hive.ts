@@ -337,6 +337,7 @@ export class Hive {
     return {
       productId: listing.id,
       ownerId: listing.sellerAccountId,
+      category: listing.category,
       productName: `hive · ${cat?.title ?? listing.category}`,
     };
   }
@@ -354,6 +355,21 @@ export class Hive {
       .set({ paymentStatus: state.status, priceFen: state.priceFen, skuId: state.skuId })
       .where(eq(listings.id, listing.id));
     return state;
+  }
+
+  // Re-reads every listing's payment state, e.g. after switching provider or changing the price in
+  // the 即刻收 mini-program. Returns how many listings can take payment.
+  async syncListingPayments() {
+    let enabled = 0;
+    for (const listing of await this.db.select().from(listings)) {
+      const state = await this.payments.setupProduct(await this.productRef(listing));
+      await this.db
+        .update(listings)
+        .set({ paymentStatus: state.status, priceFen: state.priceFen, skuId: state.skuId })
+        .where(eq(listings.id, listing.id));
+      if (state.status === "ENABLED") enabled++;
+    }
+    return enabled;
   }
 
   // ---- presence ---------------------------------------------------------
@@ -947,25 +963,45 @@ export class Hive {
     await this.detectPayment(id);
   }
 
-  // 即刻收 has no payment notification: a count is "ours" once the buyer's remaining quota
-  // exceeds the counts already reserved by other paid, undelivered orders on the same product.
+  // 即刻收 has no payment notification: a count is "ours" once the buyer's remaining quota exceeds
+  // the counts already reserved by other paid, undelivered orders on the same 即刻收 product. In
+  // direct mode one product backs every listing, so reservations count across all of the buyer's
+  // orders whose listing maps to that product, not just this listing's. Claims for one buyer and
+  // product run one at a time so two orders can't both claim a single count.
   private async detectPayment(id: string) {
-    const row = await this.loadOrder(id);
-    if (row.status !== "AWAITING_PAYMENT") return;
-    const listing = await this.listingFor(row);
-    const remaining = await this.payments.remainingQuota({ product: await this.productRef(listing), buyerId: row.buyerAccountId });
-    const [{ reserved }] = (await this.db
-      .select({ reserved: sql<number>`count(*)::int` })
-      .from(orders)
-      .where(
-        and(
-          eq(orders.listingId, listing.id),
-          eq(orders.buyerAccountId, row.buyerAccountId),
-          inArray(orders.status, RESERVING),
-        ),
-      )) as [{ reserved: number }];
-    if (remaining - reserved < 1) return;
-    await this.apply(id, { type: "payment_confirmed", paymentRef: row.purchaseRequestNo ?? id }, { paidAt: this.now() });
+    const first = await this.loadOrder(id);
+    if (first.status !== "AWAITING_PAYMENT") return;
+    const product = await this.productRef(await this.listingFor(first));
+    const key = this.payments.quotaKey(product);
+    await this.claimLock(`${first.buyerAccountId}\u0000${key}`, async () => {
+      const row = await this.loadOrder(id);
+      if (row.status !== "AWAITING_PAYMENT") return;
+      const remaining = await this.payments.remainingQuota({ product, buyerId: row.buyerAccountId });
+      if (remaining < 1) return;
+      const holding = await this.db
+        .select({ listing: listings })
+        .from(orders)
+        .innerJoin(listings, eq(listings.id, orders.listingId))
+        .where(and(eq(orders.buyerAccountId, row.buyerAccountId), inArray(orders.status, RESERVING)));
+      let reserved = 0;
+      for (const h of holding) if (this.payments.quotaKey(await this.productRef(h.listing)) === key) reserved++;
+      if (remaining - reserved < 1) return;
+      await this.apply(id, { type: "payment_confirmed", paymentRef: row.purchaseRequestNo ?? id }, { paidAt: this.now() });
+    });
+  }
+
+  // In-process mutex per key (hive runs as one server process).
+  private claims = new Map<string, Promise<void>>();
+  private async claimLock(key: string, fn: () => Promise<void>) {
+    const prev = this.claims.get(key) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => {});
+    this.claims.set(key, tail);
+    try {
+      await run;
+    } finally {
+      if (this.claims.get(key) === tail) this.claims.delete(key);
+    }
   }
 
   // Every notification goes to the in-app inbox; `reach` also sends it by push and mail to the

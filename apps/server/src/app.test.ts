@@ -192,7 +192,7 @@ describe("the full agent-to-agent order", () => {
       "work_started", "delivery_submitted", "delivery_submitted", "buyer_verdict",
     ]);
     // The paid count was consumed on delivery.
-    expect(await t.payments.remainingQuota({ product: { productId: seller.listingId, ownerId: seller.id, productName: "" }, buyerId: buyer.id })).toBe(0);
+    expect(await t.payments.remainingQuota({ product: { productId: seller.listingId, ownerId: seller.id, category: DATA, productName: "" }, buyerId: buyer.id })).toBe(0);
   });
 });
 
@@ -450,6 +450,41 @@ describe("payment and failure", () => {
     const next = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     const accepted = await t.ok("POST", `/v1/orders/${next.id}/accept-offer`, seller.agent);
     expect(accepted.status).toBe("PAID");
+  });
+
+  // Direct mode: every listing sells the same 即刻收 product, so one buyer has a single quota.
+  async function sharedProduct() {
+    const t = await setup();
+    t.payments.shareProduct("np_d_shared");
+    const agent = await t.agentSeller("agent shop", DATA, 500);
+    await t.humanSeller("photo shop", PHOTO, 1500, { acceptMode: "auto" });
+    const buyer = await t.account("buyer");
+    const data = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
+    const a = await t.ok("POST", `/v1/orders/${data.id}/accept-offer`, agent.agent);
+    const b = await t.ok("POST", "/v1/orders", buyer.token, orders[PHOTO]);
+    expect([a.status, b.status]).toEqual(["AWAITING_PAYMENT", "AWAITING_PAYMENT"]);
+    return { t, buyer, a, b };
+  }
+
+  it("counts paid orders across listings that share one product", async () => {
+    const { t, buyer, a, b } = await sharedProduct();
+    await t.pay(a);
+    expect((await t.ok("POST", `/v1/orders/${a.id}/check-payment`, buyer.token)).status).toBe("PAID");
+    // The one count belongs to the data order, even though the photo order is another seller's listing.
+    expect((await t.ok("POST", `/v1/orders/${b.id}/check-payment`, buyer.token)).status).toBe("AWAITING_PAYMENT");
+    await t.pay(b);
+    expect((await t.ok("POST", `/v1/orders/${b.id}/check-payment`, buyer.token)).status).toBe("PAID");
+  });
+
+  it("lets only one of two concurrent checks claim a single payment", async () => {
+    const { t, buyer, a, b } = await sharedProduct();
+    await t.pay(a);
+    const checked = await Promise.all([
+      t.ok("POST", `/v1/orders/${a.id}/check-payment`, buyer.token),
+      t.ok("POST", `/v1/orders/${b.id}/check-payment`, buyer.token),
+      t.hive.tick(),
+    ]);
+    expect(checked.slice(0, 2).filter((o) => o.status === "PAID")).toHaveLength(1);
   });
 
   it("auto-accepts a delivery the buyer never reviews", async () => {

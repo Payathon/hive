@@ -186,6 +186,7 @@ export class HiveClient {
       configurationUrl: string | null;
       configurationQrCode: string | null;
       managementUrl: string | null;
+      note?: string | null;
     }>("POST", `/v1/listings/${category}/payment-setup`, {});
   }
 }

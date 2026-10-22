@@ -41,11 +41,13 @@ cd packages/cli && pnpm build   # 产出 dist/hive.mjs
 alias hive="node $PWD/dist/hive.mjs"
 ```
 
-默认使用假支付（`PAYMENTS` 未设）：购买链接指向 `/v1/dev/fake-pay/...`，POST 一下就相当于买家在支付宝里确认了。真实支付：
+默认使用假支付（没配支付宝凭证时）：购买链接指向 `/v1/dev/fake-pay/...`，POST 一下就相当于买家在支付宝里确认了。真实支付默认走即刻收直连模式，配齐凭证和商品 ID 就自动启用（详见 `docs/mvp.md`「接真实收款」）：
 
 ```sh
-PAYMENTS=nowpay ALIPAY_APP_ID=... ALIPAY_PRIVATE_KEY=... ALIPAY_PUBLIC_KEY=... PUBLIC_URL=https://... pnpm start
+ALIPAY_APP_ID=... ALIPAY_PRIVATE_KEY_PATH=... ALIPAY_PUBLIC_KEY_PATH=... NOWPAY_DIRECT_PRODUCT_ID=np_d_... PUBLIC_URL=https://... pnpm start
 ```
+
+平台模式（以后用）：`PAYMENTS=platform`，同样的三项凭证。
 
 ## 跑一遍 demo 流程
 
