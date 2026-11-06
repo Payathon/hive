@@ -34,7 +34,7 @@ export const orders = {
 
 export const validDelivery = { data: { stores: [{ name: "一点点", area: "湖滨", address: "平海路 1 号" }], source: "seed" } };
 
-export async function setup(opts: Pick<HiveOptions, "mailer" | "push"> = {}) {
+export async function setup(opts: Pick<HiveOptions, "mailer" | "push" | "reviewer"> = {}) {
   let now = new Date("2026-10-14T02:00:00Z");
   const payments = new FakePaymentProvider(BASE);
   const hive = new Hive({ db: await connectTestDb(), payments, clock: () => now, webUrl: "http://web.test", ...opts });

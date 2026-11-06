@@ -27,6 +27,8 @@ import { OutboxMailer, type Mailer } from "./mail.ts";
 import { lockOrder, orderColumns, rowToOrder, saveTransition, type OrderRow } from "./orders-repo.ts";
 import type { PaymentProvider, ProductRef } from "./payments/provider.ts";
 import type { PushMessage, PushSender, PushTarget } from "./push.ts";
+import { RuleReviewer } from "./review/rules.ts";
+import { runReview, type OrderReview, type Reviewer } from "./review/reviewer.ts";
 
 export type Actor = "human" | "agent";
 export interface Principal {
@@ -41,6 +43,8 @@ export class HiveError extends Error {
     readonly status: 400 | 401 | 403 | 404 | 409 | 422 | 502,
     readonly code: string,
     message: string,
+    // Extra fields for the error body, e.g. the review's reasons on order_rejected.
+    readonly extra?: Record<string, unknown>,
   ) {
     super(message);
   }
@@ -86,6 +90,8 @@ export interface HiveOptions {
   push?: PushSender | null;
   // Where the web app lives, for links in mail.
   webUrl?: string;
+  // Reviews each new order before dispatch (design §4.1); keyword rules when absent or failing.
+  reviewer?: Reviewer | null;
 }
 
 // Headline per notification kind, for push and mail.
@@ -128,6 +134,8 @@ export class Hive {
   readonly push: PushSender | null;
   private readonly webUrl: string;
   private readonly clock: () => Date;
+  private readonly reviewer: Reviewer | null;
+  private readonly rules = new RuleReviewer();
   // Push and mail in flight; they never hold up or fail the order change that caused them.
   private readonly outgoing = new Set<Promise<void>>();
   private categoryCache: { at: number; list: CategoryRow[] } | null = null;
@@ -142,6 +150,7 @@ export class Hive {
     this.push = opts.push ?? null;
     this.webUrl = (opts.webUrl ?? "http://localhost:5173").replace(/\/$/, "");
     this.clock = opts.clock ?? (() => new Date());
+    this.reviewer = opts.reviewer ?? null;
   }
 
   now() {
@@ -391,7 +400,7 @@ export class Hive {
   // ---- orders: buyer side -----------------------------------------------
 
   async createOrder(p: Principal, req: OrderRequest) {
-    await this.getCategory(req.category);
+    const cat = await this.getCategory(req.category);
     const spec = checkDeliverySpec(req.delivery);
     if (!spec.ok) throw new HiveError(422, "invalid_delivery_spec", spec.error);
 
@@ -403,6 +412,18 @@ export class Hive {
     }
 
     const input = req.input === undefined ? null : req.input;
+    // Reviewed before any seller sees it: blocked orders are refused with reasons the buyer's agent can act on.
+    const review = await runReview(
+      this.reviewer,
+      this.rules,
+      { category: { id: cat.id, title: cat.title, blurb: cat.blurb }, brief: req.brief, input, deliverySpec: spec.value },
+      this.now(),
+    );
+    if (review.verdict === "block") {
+      throw new HiveError(422, "order_rejected", `平台审核没有通过：${review.reasons.join("；") || "需求不符合平台规则"}。改写需求后可以重新下单`, {
+        reasons: review.reasons,
+      });
+    }
     const order = newOrder({ id: newId("ord"), category: req.category, buyerAccountId: p.accountId, input, deliverySpec: spec.value });
     await this.db.insert(orders).values({
       id: order.id,
@@ -414,6 +435,7 @@ export class Hive {
       input,
       deliverySpec: spec.value,
       maxPriceFen,
+      review,
       ...orderColumns(order),
       createdAt: this.now(),
       updatedAt: this.now(),
@@ -464,7 +486,13 @@ export class Hive {
 
   // ---- orders: seller side ----------------------------------------------
 
-  async acceptOffer(p: Principal, orderId: string) {
+  // A flagged order is taken only by someone who saw the review's warning: the 接单台 says so, while
+  // `hive serve` (including versions from before reviews) never does, so it can't take one unseen.
+  async acceptOffer(p: Principal, orderId: string, opts: { reviewSeen?: boolean } = {}) {
+    const row = await this.loadOrder(orderId);
+    if (reviewOf(row)?.verdict === "flag" && !opts.reviewSeen) {
+      throw new HiveError(409, "needs_owner_approval", "平台审核对这单有提示，要卖家本人在接单台看过后接单");
+    }
     await this.acceptFor(p.accountId, orderId);
     return this.getOrder(p, orderId);
   }
@@ -878,6 +906,7 @@ export class Hive {
       buyerAccountId: row.buyerAccountId,
       maxPriceFen: row.maxPriceFen === null ? null : fen(row.maxPriceFen),
       passedBy: row.passedBy,
+      needsApproval: reviewOf(row)?.verdict === "flag",
     });
     if (!offer) {
       await this.apply(id, { type: "no_candidates" });
@@ -1087,6 +1116,9 @@ export function publicOrder(r: OrderRow, viewerId: string) {
   const output = r.output as Delivery | null;
   const buyer = r.buyerAccountId === viewerId;
   const working = r.sellerAccountId === viewerId && r.paidAt !== null;
+  const review = reviewOf(r);
+  // The review may judge that sellers can't decide without the input; otherwise they get its shape.
+  const seesInput = buyer || working || review?.discloseInput === true;
   return {
     id: r.id,
     category: r.category,
@@ -1095,8 +1127,11 @@ export function publicOrder(r: OrderRow, viewerId: string) {
     sellerAccountId: r.sellerAccountId,
     createdByActor: r.createdByActor,
     brief: r.brief,
-    input: buyer || working ? r.input : null,
-    inputWithheld: !buyer && !working && r.input !== null,
+    input: seesInput ? r.input : null,
+    inputWithheld: !seesInput && r.input !== null,
+    inputSummary: !seesInput && r.input !== null ? (review?.inputSummary ?? null) : null,
+    // Sellers see the review only when it warns them; the buyer always sees it.
+    review: review && (buyer || review.verdict !== "allow") ? { verdict: review.verdict, reasons: review.reasons } : null,
     deliverySpec: r.deliverySpec,
     output: output && { ...output, files: (output.files ?? []).map(fileRef) },
     priceFen: r.priceFen,
@@ -1114,3 +1149,5 @@ export function publicOrder(r: OrderRow, viewerId: string) {
     createdAt: r.createdAt,
   };
 }
+
+export const reviewOf = (r: OrderRow) => r.review as OrderReview | null;

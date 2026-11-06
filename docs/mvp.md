@@ -96,6 +96,14 @@ export NOWPAY_DIRECT_PRODUCT_ID=np_d_...
 pnpm demo   # 或 pnpm --filter @hive/server start
 ```
 
+**订单审核**（design §4.1）：不配也能跑，这时只用关键词规则审核。
+
+| 变量 | 说明 |
+|---|---|
+| `DEEPSEEK_API_KEY` | 配了就用 DeepSeek 审核新订单；出错或超过 8 秒时退回关键词规则 |
+| `REVIEW_MODEL` | 可选，默认 `deepseek-flash`（关闭思考） |
+| `DEEPSEEK_BASE_URL` | 可选，默认 `https://api.deepseek.com` |
+
 `seed/e2e.mjs` 靠假支付的"点一下就付"，只能在假支付下跑；接了真实收款后用网页或 agent 手动走一单。
 
 **怎么确认接上了**：启动日志会打出 `即刻收直连 product np_d_…: ENABLED, ¥5.00 (sku …)` 和 `N listing(s) can take payment`，`/healthz` 返回 `"payments":"nowpay-direct"`。启动时会用 `charge.query` 重新同步所有上架的状态和价格（之前在假支付下是 ¥5 ENABLED 的上架会换成真实价格）；小程序里改了价，重启一次或在接单台点「设置收款」就会同步。商品不是 ENABLED 时，卖家在接单台点「设置收款」只会看到一句说明（收款由运营方配置，当前状态是什么），不会被引去开通。

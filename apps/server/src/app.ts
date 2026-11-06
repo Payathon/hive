@@ -39,7 +39,7 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
   const webUrl = (c: Context) => (opts.webUrl ?? new URL(c.req.url).origin).replace(/\/$/, "");
 
   app.onError((err, c) => {
-    if (err instanceof HiveError) return c.json({ error: err.code, message: err.message }, err.status);
+    if (err instanceof HiveError) return c.json({ error: err.code, message: err.message, ...err.extra }, err.status);
     console.error(err);
     return c.json({ error: "internal", message: "internal error" }, 500);
   });
@@ -249,7 +249,11 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
   authed.get("/orders/:id", async (c) => c.json(await hive.orderDetail(me(c), c.req.param("id"))));
   authed.post("/orders/:id/cancel", async (c) => c.json(await hive.cancelOrder(me(c), c.req.param("id"))));
   authed.post("/orders/:id/check-payment", async (c) => c.json(await hive.checkPayment(me(c), c.req.param("id"))));
-  authed.post("/orders/:id/accept-offer", async (c) => c.json(await hive.acceptOffer(me(c), c.req.param("id"))));
+  // The 接单台 sends reviewSeen once the seller has seen a flagged order's warning.
+  authed.post("/orders/:id/accept-offer", async (c) => {
+    const { reviewSeen } = z.object({ reviewSeen: z.boolean().optional() }).catch({}).parse(await c.req.json().catch(() => ({})));
+    return c.json(await hive.acceptOffer(me(c), c.req.param("id"), { reviewSeen: reviewSeen === true }));
+  });
   authed.post("/orders/:id/decline-offer", async (c) => {
     await hive.declineOffer(me(c), c.req.param("id"));
     return c.json({ ok: true });

@@ -144,6 +144,8 @@ export const orders = pgTable(
     cancelReason: text("cancel_reason"),
     failReason: text("fail_reason"),
     refundEligible: boolean("refund_eligible").notNull().default(false),
+    // The platform review at creation (review/reviewer.ts OrderReview); null on orders from before it.
+    review: jsonb("review"),
     createdAt: ts("created_at").notNull().defaultNow(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },

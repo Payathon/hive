@@ -36,6 +36,13 @@
       "when": 1792645207121,
       "tag": "0004_notify_channels",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794001209533,
+      "tag": "0005_order_review",
+      "breakpoints": true
     }
   ]
 }

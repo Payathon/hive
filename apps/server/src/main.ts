@@ -14,6 +14,7 @@ import { NowPayProvider } from "./payments/nowpay.ts";
 import { NowPayDirectProvider, type DirectProduct } from "./payments/nowpay-direct.ts";
 import type { PaymentProvider } from "./payments/provider.ts";
 import { pushFromEnv } from "./push.ts";
+import { reviewerFromEnv } from "./review/deepseek.ts";
 
 // An empty variable (KEY= in an env file) means unset, so `??` defaults below still apply.
 for (const [k, v] of Object.entries(process.env)) if (v === "") delete process.env[k];
@@ -71,7 +72,10 @@ const webUrl = process.env.WEB_URL ?? process.env.PUBLIC_URL;
 const mailer = mailerFromEnv(db);
 const push = pushFromEnv(process.env.VAPID_FILE ?? ".data/vapid.json");
 const payments = paymentsFromEnv();
-const hive = new Hive({ db, payments, files, mailer, push, webUrl: webUrl ?? baseUrl });
+// DEEPSEEK_API_KEY turns on the model reviewer for new orders; without it, keyword rules review them.
+const reviewer = reviewerFromEnv();
+console.log(`order review: ${reviewer ? `${reviewer.name} (${reviewer.model})` : "rules only"}`);
+const hive = new Hive({ db, payments, files, mailer, push, webUrl: webUrl ?? baseUrl, reviewer });
 // The CLI bundle agents download from /hive.mjs. In the repo, build it on first start if it's missing.
 const cliBundle = process.env.HIVE_CLI_BUNDLE ?? fileURLToPath(new URL("../../../packages/cli/dist/hive.mjs", import.meta.url));
 if (!existsSync(cliBundle) && !process.env.HIVE_CLI_BUNDLE) {
