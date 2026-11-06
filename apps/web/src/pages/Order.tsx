@@ -63,8 +63,28 @@ function inputRows(o: OrderDetail): Array<[string, ReactNode]> {
   return [
     ["要做什么", <span className="note">{o.brief}</span>],
     ...(o.input !== null && o.input !== undefined ? [["附加数据", <code>{JSON.stringify(o.input)}</code>] as [string, ReactNode]] : []),
+    ...(o.inputWithheld ? [["附加数据", "买家付款后可见"] as [string, ReactNode]] : []),
     ["交付要求", specText(o.deliverySpec)],
   ];
+}
+
+// Before paying, the buyer sees what their order hands to strangers: the brief to every seller it is
+// offered to, the input only to the one who takes it once paid. Agents fill these in, so show them.
+function SellersSee({ o }: { o: OrderDetail }) {
+  const hasInput = o.input !== null && o.input !== undefined;
+  return (
+    <div className="card">
+      <h4><span>卖家会看到</span></h4>
+      <dl className="kv">
+        <dt>派单时</dt>
+        <dd>收到派单的卖家都能看到「要做什么」</dd>
+        <dt>付款后</dt>
+        <dd>{hasInput ? "附加数据只给接单的卖家" : "没有附加数据"}</dd>
+      </dl>
+      <p className="note" style={{ marginTop: 8 }}>{o.brief}</p>
+      {hasInput && <pre className="json">{JSON.stringify(o.input, null, 2)}</pre>}
+    </div>
+  );
 }
 
 type Store = { name: string; area?: string; address?: string; rating?: number; priceLevel?: number };
@@ -379,6 +399,7 @@ export function OrderPage() {
     <>
       {(o.status === "DELIVERED" || o.status === "COMPLETED") && <Deliverable o={o} />}
       {role === "seller" && (o.status === "PAID" || o.status === "IN_PROGRESS") && <DeliverForm o={o} onDone={() => void reload()} />}
+      {role === "buyer" && !o.paidAt && !isTerminal(o) && <SellersSee o={o} />}
       <div className="card">
         <h4>订单进度</h4>
         <Timeline steps={timeline(o, role)} />

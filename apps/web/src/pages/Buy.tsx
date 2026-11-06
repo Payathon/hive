@@ -78,6 +78,7 @@ export function Buy() {
         <label htmlFor="brief">要做什么</label>
         <textarea id="brief" className="prose" value={brief} onChange={(e) => setBrief(e.target.value)} required maxLength={4000}
           placeholder="说清楚要什么、在哪里、有什么要求。卖家的标签会和这段话匹配" />
+        <span className="hint">收到派单的卖家都能看到，别写手机号、门牌号这类隐私</span>
       </div>
       <div className="field">
         <label htmlFor="kind">交付成什么样</label>
@@ -113,6 +114,7 @@ export function Buy() {
       <div className="field">
         <label htmlFor="extra">附加数据（JSON，可不填）</label>
         <textarea id="extra" value={extra} onChange={(e) => setExtra(e.target.value)} placeholder='例如要画成图的数据：[{ "商圈": "湖滨", "门店数": 12 }]' />
+        <span className="hint">付款后才给接单的那位卖家，具体地址、联系方式放这里</span>
       </div>
     </div>
   );
