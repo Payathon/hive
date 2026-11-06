@@ -96,7 +96,7 @@ export NOWPAY_DIRECT_PRODUCT_ID=np_d_...
 pnpm demo   # 或 pnpm --filter @hive/server start
 ```
 
-**订单审核**（design §4.1）：不配也能跑，这时只用关键词规则审核。
+**订单审核**（design §3「平台审核」）：不配也能跑，这时只用关键词规则审核。
 
 | 变量 | 说明 |
 |---|---|

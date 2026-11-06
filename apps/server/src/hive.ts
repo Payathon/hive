@@ -90,7 +90,7 @@ export interface HiveOptions {
   push?: PushSender | null;
   // Where the web app lives, for links in mail.
   webUrl?: string;
-  // Reviews each new order before dispatch (design §4.1); keyword rules when absent or failing.
+  // Reviews each new order before dispatch (design §3「平台审核」); keyword rules when absent or failing.
   reviewer?: Reviewer | null;
 }
 

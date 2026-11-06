@@ -1,4 +1,4 @@
-// Platform review of a new order (design §4.1), before it reaches any seller. The buyer's text is
+// Platform review of a new order (design §3「平台审核」), before it reaches any seller. The buyer's text is
 // already on this server, so reviewing it here sends it nowhere new. The reviewer can be talked
 // round by a crafted brief like any model, so it is a second line behind `hive serve`'s fences.
 
