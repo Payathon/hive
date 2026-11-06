@@ -46,6 +46,7 @@ export class Listener {
         dailyLimit: entry.daily_limit,
         tags: entry.tags,
         intro: entry.intro ?? null,
+        ...(entry.price !== undefined ? { priceFen: Math.round(entry.price * 100) } : {}),
       });
       const pay = await this.client.paymentSetup(entry.category);
       if (pay.status === "ENABLED" && pay.priceFen !== null) {
@@ -53,7 +54,7 @@ export class Listener {
         this.log(`listed ${entry.category} at ${yuan(pay.priceFen)} (${entry.accept}${hand})`);
       } else {
         if (pay.note && !pay.configurationUrl) {
-          this.log(`${entry.category}: 即刻收 status ${pay.status}: ${pay.note}`);
+          this.log(`${entry.category}: payment ${pay.status}: ${pay.note}${entry.price === undefined ? " (add price: <yuan> to capabilities.yaml)" : ""}`);
         } else {
           const next = pay.configurationUrl ?? pay.managementUrl ?? "(no link returned)";
           this.log(`${entry.category}: 即刻收 status ${pay.status}, set a "1 次" price in Alipay: ${next}`);

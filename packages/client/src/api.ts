@@ -116,6 +116,8 @@ export interface ListingOptions {
   dailyLimit: number;
   tags?: string[];
   intro?: string | null;
+  // Fen per order; only servers on 电脑网站支付 take it (with 即刻收 the price is set in Alipay).
+  priceFen?: number | null;
 }
 
 export class HiveClient {

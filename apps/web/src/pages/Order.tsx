@@ -45,7 +45,7 @@ function statusLine(o: OrderDetail, role: Role, now: number): string {
     case "AWAITING_PAYMENT":
       return buyer ? `请在 ${left} 内付款，超时自动取消` : `等买家付款，${left} 后超时取消`;
     case "PAID":
-      return buyer ? "钱已直接付给卖家，等卖家开始" : "买家已付款，做完在下面交付";
+      return buyer ? "已付款，等卖家开始" : "买家已付款，做完在下面交付";
     case "IN_PROGRESS":
       return `${left} 内交付`;
     case "DELIVERED":
@@ -55,7 +55,22 @@ function statusLine(o: OrderDetail, role: Role, now: number): string {
     case "CANCELLED":
       return CANCEL_REASON[o.cancelReason ?? ""] ?? "";
     case "FAILED":
-      return (FAIL_REASON[o.failReason ?? ""] ?? "") + (o.paidAt && buyer ? "。退款功能还在接入中，请联系卖家" : "");
+      return (FAIL_REASON[o.failReason ?? ""] ?? "") + (o.paidAt && buyer ? refundText(o.refund) : "");
+  }
+}
+
+// A failed paid order is refunded in full to where the money came from (电脑网站支付).
+function refundText(refund: OrderDetail["refund"]): string {
+  switch (refund?.status) {
+    case "SUCCEEDED":
+      return `。已原路退款 ¥${yuan(refund.amountFen)}`;
+    case "REQUESTED":
+    case "PROCESSING":
+      return "。退款处理中，会原路退回";
+    case "FAILED":
+      return "。自动退款没成功，平台会人工退款";
+    default:
+      return "。退款请联系平台";
   }
 }
 
@@ -285,7 +300,8 @@ export function OrderPage() {
   const { data: o, error, reload } = usePoll(
     async () => {
       let order = await hive.order(id);
-      // 即刻收 sends no payment notification, so the buyer's page asks while it waits.
+      // Payment results may never be pushed to hive (即刻收 has no notification; http servers get none),
+      // so the buyer's page asks while it waits.
       if (order.status === "AWAITING_PAYMENT" && order.buyerAccountId === me.id) {
         await hive.action(id, "check-payment").catch(() => {});
         order = await hive.order(id);
@@ -347,7 +363,7 @@ export function OrderPage() {
       actions = (
         <>
           <button className="btn" type="button" disabled={busy} onClick={() => act("verdict", { verdict: "accepted" }, "已确认收货")}>确认收货</button>
-          <button className="link" type="button" disabled={busy} onClick={() => window.confirm("拒收会计入卖家的通过率，钱已经付给卖家，暂时不能自动退款。确定拒收吗？") && act("verdict", { verdict: "rejected" }, "已拒收")}>拒收</button>
+          <button className="link" type="button" disabled={busy} onClick={() => window.confirm("拒收会计入卖家的通过率，但不会自动退款。确定拒收吗？") && act("verdict", { verdict: "rejected" }, "已拒收")}>拒收</button>
         </>
       );
     if (isTerminal(o)) actions = <Link className="btn line" style={{ textAlign: "center" }} to={`/buy/${o.category}`}>再来一单</Link>;
@@ -356,7 +372,7 @@ export function OrderPage() {
     if (o.status === "PAID")
       actions = <button className="link" type="button" disabled={busy} onClick={() => act("start", undefined, "已告诉买家你开始了")}>先告诉买家我开始了</button>;
     if (o.status === "IN_PROGRESS")
-      actions = <button className="link" type="button" disabled={busy} onClick={() => window.confirm("放弃后订单失败，买家的钱已经付给你了。确定放弃吗？") && act("abandon", undefined, "已放弃")}>放弃这单</button>;
+      actions = <button className="link" type="button" disabled={busy} onClick={() => window.confirm("放弃后这单就失败了，买家付的钱会原路退回。确定放弃吗？") && act("abandon", undefined, "已放弃")}>放弃这单</button>;
   }
 
   const amount = o.priceFen === null ? "—" : `${o.status === "COMPLETED" ? (role === "buyer" ? "-" : "+") : ""}${yuan(o.priceFen)}`;

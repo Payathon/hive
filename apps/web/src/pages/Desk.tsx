@@ -79,9 +79,22 @@ function OfferSheet({ offer, priceFen, onGrab, onSkip, busy }: { offer: OrderSum
   );
 }
 
+// "5" or "0.01" yuan to fen, within what one order may cost; null when it isn't a price.
+function priceFen(text: string): number | null {
+  if (!/^\d+(\.\d{1,2})?$/.test(text.trim())) return null;
+  const n = Math.round(Number(text) * 100);
+  return n >= 1 && n <= 1_000_000 ? n : null;
+}
+
 function Listings({ listings, reload }: { listings: Listing[] | null; reload: () => Promise<void> }) {
+  const { me } = useSession();
+  // 电脑网站支付: each listing carries the seller's own price. 即刻收: the price is set in Alipay.
+  const ownPrice = me.sellerSetsPrice === true;
   const { busy, run } = useAction();
   const toast = useToast();
+  const [price, setPrice] = useState("");
+  const [repricing, setRepricing] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
   const listed = new Set(listings?.map((l) => l.category));
   const unlisted = allCategories().filter((c) => !listed.has(c.id)).map((c) => c.id);
   const [type, setType] = useState("");
@@ -106,9 +119,16 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
     e.preventDefault();
     const t = type || unlisted[0];
     if (!t) return;
-    const opts = { acceptMode: accept, deliveryHours: Number(hours) || usualHours, dailyLimit: Number(limit), tags: splitTags(tags), intro: intro.trim() || null };
+    const fen = priceFen(price);
+    if (ownPrice && fen === null) return toast("价格填 0.01 到 10000 元");
+    const opts = {
+      acceptMode: accept, deliveryHours: Number(hours) || usualHours, dailyLimit: Number(limit), tags: splitTags(tags), intro: intro.trim() || null,
+      ...(ownPrice && fen !== null ? { priceFen: fen } : {}),
+    };
     if (!(await run(() => hive.upsertListing(t, opts)))) return;
-    await setup(t);
+    if (ownPrice) await reload();
+    else await setup(t);
+    setPrice("");
     setType("");
     setTags("");
     setIntro("");
@@ -116,9 +136,18 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
     setAdding(false);
   }
 
+  async function reprice(l: Listing) {
+    const fen = priceFen(draft);
+    if (fen === null) return toast("价格填 0.01 到 10000 元");
+    if (!(await run(() => hive.setPrice(l, fen)))) return;
+    toast(`已改成每单 ¥${yuan(fen)}`);
+    setRepricing(null);
+    await reload();
+  }
+
   return (
     <div className="card">
-      <h4><span>我能接的活</span><small>价格在支付宝收款页里设置</small></h4>
+      <h4><span>我能接的活</span><small>{ownPrice ? "每单价格你来定，买家在支付宝收银台付款" : "价格在支付宝收款页里设置"}</small></h4>
       {listings?.map((l) => (
         <div className="list-row" key={l.id}>
           <TypeTile type={l.category} size={32} />
@@ -128,7 +157,16 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
             {l.tags.length > 0 && <div className="chips">{l.tags.slice(0, 5).map((t) => <span key={t}>{t}</span>)}</div>}
           </div>
           <div className="r">
-            {l.paymentStatus === "ENABLED" ? (
+            {ownPrice && repricing === l.id ? (
+              <span className="stepper">
+                <input aria-label="每单价格" inputMode="decimal" autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === "Enter" && reprice(l)} />
+                <button className="btn sm" type="button" disabled={busy} onClick={() => reprice(l)}>保存</button>
+              </span>
+            ) : ownPrice ? (
+              <button className="btn sm" type="button" disabled={busy} onClick={() => { setDraft(l.priceFen === null ? "" : yuan(l.priceFen)); setRepricing(l.id); }}>
+                {l.priceFen === null ? "设价格" : <>¥<span className="tnum">{yuan(l.priceFen)}</span> 改价</>}
+              </button>
+            ) : l.paymentStatus === "ENABLED" ? (
               <b className="tnum">¥{yuan(l.priceFen)}</b>
             ) : (
               <button className="btn sm" type="button" disabled={busy} onClick={() => setup(l.category)}>设置收款</button>
@@ -168,6 +206,12 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
               <span className="stepper"><input id="l-hours" aria-label="几小时内交付" type="number" min={1} max={720} value={hours} placeholder={String(usualHours)} onChange={(e) => setHours(e.target.value)} /><span>小时内</span></span>
             </div>
           </div>
+          {ownPrice && (
+            <div className="field">
+              <label htmlFor="l-price">每单价格</label>
+              <span className="stepper"><input id="l-price" aria-label="每单价格" inputMode="decimal" value={price} placeholder="例如 5" onChange={(e) => setPrice(e.target.value)} /><span>元</span></span>
+            </div>
+          )}
           <div className="field">
             <label htmlFor="l-tags">标签</label>
             <input id="l-tags" aria-label="标签" value={tags} onChange={(e) => setTags(e.target.value)} placeholder={`空格隔开，例如 ${(chosen?.tags ?? []).slice(0, 3).join(" ") || "湖滨 门头"}`} />
@@ -176,7 +220,7 @@ function Listings({ listings, reload }: { listings: Listing[] | null; reload: ()
             <label htmlFor="l-intro">一句介绍</label>
             <input id="l-intro" aria-label="一句介绍" value={intro} maxLength={200} onChange={(e) => setIntro(e.target.value)} placeholder="买家在市场里能看到" />
           </div>
-          <button className="btn" type="submit" disabled={busy}>上架并设置收款</button>
+          <button className="btn" type="submit" disabled={busy}>{ownPrice ? "上架" : "上架并设置收款"}</button>
         </form>
       )}
     </div>

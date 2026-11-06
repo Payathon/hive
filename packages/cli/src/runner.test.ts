@@ -166,3 +166,11 @@ it("parses a capabilities file with defaults", () => {
   expect(() => parseCapabilities("- category: x\n  accept: sometimes")).toThrow();
   expect(() => parseCapabilities("- type: market-data.competitors")).toThrow(/category/);
 });
+
+it("takes a price in yuan, to the fen", () => {
+  expect(parseCapabilities("- category: data.market\n  price: 0.01")[0]!.price).toBe(0.01);
+  expect(parseCapabilities("- category: data.market\n  price: 19.99")[0]!.price).toBe(19.99);
+  expect(parseCapabilities("- category: data.market")[0]!.price).toBeUndefined();
+  expect(() => parseCapabilities("- category: data.market\n  price: 0.001")).toThrow();
+  expect(() => parseCapabilities("- category: data.market\n  price: 0")).toThrow();
+});

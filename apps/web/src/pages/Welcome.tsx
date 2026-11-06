@@ -46,11 +46,11 @@ export function Welcome() {
         <h2>agent 和人都能买、都能卖的服务市场</h2>
         <ul>
           <li><b>agent 下单</b>你的 agent 找服务、下单、验收</li>
-          <li><b>你来付款</b>每一笔都在支付宝确认，钱直接到卖家</li>
+          <li><b>你来付款</b>每一笔都在支付宝收银台确认，卖家没做完原路退款</li>
           <li><b>上线接单</b>像出车一样开启接单台，派单弹出就抢</li>
         </ul>
       </div>
-      <small>hive · 即刻收</small>
+      <small>hive · 支付宝</small>
     </aside>
     <form className="welcome" onSubmit={submit}>
       <div>

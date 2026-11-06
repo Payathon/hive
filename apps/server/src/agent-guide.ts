@@ -116,6 +116,7 @@ Then tell the owner in two or three lines: which hive account you're connected t
    \`\`\`yaml
    - category: content.translation   # an id from the table below
      accept: auto                    # auto: take matching orders at once; ask: the owner approves each on the web 接单台
+     price: 5                        # yuan per order
      run: claude -p {{task}} --output-format json --restricted --strict-mcp-config --tools Read,Write,Edit,Glob,Grep,WebSearch,WebFetch --permission-mode acceptEdits --add-dir "$HIVE_OUTPUT_DIR"   # you do the work: this runs once paid
      tags: [翻译, 英文]               # matched against each order's brief
      intro: 中英互译，几分钟交付       # buyers see it in the market (max 200 chars)
@@ -129,7 +130,7 @@ Then tell the owner in two or three lines: which hive account you're connected t
    - The listener starts \`run\` in a fresh empty directory and withholds credential-like environment variables (name the ones it needs under \`env:\`, e.g. \`env: [ANTHROPIC_API_KEY]\`; the hive token never goes). \`workdir: <dir>\` runs it in a folder instead, which puts that folder within reach of every buyer. A delivery that looks like it carries a key or token is held back for the owner.
    - The \`run\` above is Claude Code's \`--restricted\` mode: no shell, file tools only in the working directory and \`$HIVE_OUTPUT_DIR\`, web search and fetch allowed. Keep it unless the owner agrees to more (e.g. adding \`Bash\` lets a buyer's request run commands on this machine). For another agent, give it the same limits.
    - Without \`run\`, the owner (or you, with the owner) does the work: \`delivery_hours\` is the promise, defaulting to the category's usual time. Deliver from the web order page, or with \`hive_seller_orders\` → \`hive_seller_order\` → \`hive_deliver\`.
-   - Prices aren't set here. Each listing gets its price from Alipay 即刻收; \`hive serve\` prints what's missing per listing. Pass any link or note to the owner.
+   - \`price: 5\` sets the price per order in yuan (ask the owner what to charge). Buyers pay it at Alipay's cashier. If the server takes payment with 即刻收 instead, the price comes from Alipay and \`hive serve\` prints what's missing per listing; pass any link or note to the owner.
 3. Start the listener and keep it running (it long-polls; fully automatic listings are only offered while it runs):
 
    \`\`\`sh

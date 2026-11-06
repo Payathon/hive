@@ -83,27 +83,29 @@ if (!state) {
   const studio = await persona("studio", "hive 工作室", "工作室接单器");
   const shop = await persona("shop", "我的小店", "小店接单器");
 
+  // Prices only count when the server takes payment with 电脑网站支付: a real demo order costs one fen.
+  // Under fake payments every listing is ¥5 regardless.
   writeFileSync(
     join(studio.home, "capabilities.yaml"),
     yaml([
-      { category: "data.market", accept: "auto", tags: ["竞品", "门店", "奶茶", "选址"], intro: "秒出示例竞品门店数据", run: node("data-agent.mjs") },
-      { category: "design.chart", accept: "auto", tags: ["柱状图", "对比", "图表"], intro: "把数据画成 SVG 柱状图", run: node("chart-agent.mjs") },
-      { category: "content.writing", accept: "auto", tags: ["文案", "小红书", "公众号"], intro: "Claude 写文案，几分钟交付", run: node("claude-agent.mjs") },
-      { category: "content.translation", accept: "auto", tags: ["翻译", "英文", "日文"], intro: "Claude 翻译，几分钟交付", run: node("claude-agent.mjs") },
-      { category: "content.summary", accept: "auto", tags: ["摘要", "纪要", "总结"], intro: "Claude 整理摘要和纪要", run: node("claude-agent.mjs") },
-      { category: "data.research", accept: "auto", tags: ["调研", "资料", "报告"], intro: "Claude 上网查资料并整理", run: node("claude-agent.mjs") },
-      { category: "dev.code", accept: "auto", tags: ["脚本", "Python", "自动化"], intro: "Claude 写脚本，以文件交付", run: node("claude-agent.mjs") },
+      { category: "data.market", accept: "auto", price: 0.01, tags: ["竞品", "门店", "奶茶", "选址"], intro: "秒出示例竞品门店数据", run: node("data-agent.mjs") },
+      { category: "design.chart", accept: "auto", price: 0.01, tags: ["柱状图", "对比", "图表"], intro: "把数据画成 SVG 柱状图", run: node("chart-agent.mjs") },
+      { category: "content.writing", accept: "auto", price: 0.01, tags: ["文案", "小红书", "公众号"], intro: "Claude 写文案，几分钟交付", run: node("claude-agent.mjs") },
+      { category: "content.translation", accept: "auto", price: 0.01, tags: ["翻译", "英文", "日文"], intro: "Claude 翻译，几分钟交付", run: node("claude-agent.mjs") },
+      { category: "content.summary", accept: "auto", price: 0.01, tags: ["摘要", "纪要", "总结"], intro: "Claude 整理摘要和纪要", run: node("claude-agent.mjs") },
+      { category: "data.research", accept: "auto", price: 0.01, tags: ["调研", "资料", "报告"], intro: "Claude 上网查资料并整理", run: node("claude-agent.mjs") },
+      { category: "dev.code", accept: "auto", price: 0.01, tags: ["脚本", "Python", "自动化"], intro: "Claude 写脚本，以文件交付", run: node("claude-agent.mjs") },
     ]),
   );
   writeFileSync(
     join(shop.home, "capabilities.yaml"),
     yaml([
       // 审批 + agent: you approve on the 接单台, then Claude does the work.
-      { category: "dev.review", accept: "ask", tags: ["代码审查", "review", "安全"], intro: "我先看需求再接，接了由 agent 审查", run: node("claude-agent.mjs") },
+      { category: "dev.review", accept: "ask", price: 0.01, tags: ["代码审查", "review", "安全"], intro: "我先看需求再接，接了由 agent 审查", run: node("claude-agent.mjs") },
       // 审批 + 我自己来: an offline job you deliver from the phone camera.
-      { category: "onsite.photo", accept: "ask", tags: ["拍照", "探店", "门头", "湖滨"], intro: "杭州湖滨附近，2 小时内拍好", delivery_hours: 2 },
+      { category: "onsite.photo", accept: "ask", price: 0.01, tags: ["拍照", "探店", "门头", "湖滨"], intro: "杭州湖滨附近，2 小时内拍好", delivery_hours: 2 },
       // 自动接单 + 我自己来: taken at once, you deliver by hand or through your agent's MCP.
-      { category: "design.image", accept: "auto", tags: ["海报", "封面", "配图"], intro: "自动接单，24 小时内人工交付", delivery_hours: 24 },
+      { category: "design.image", accept: "auto", price: 0.01, tags: ["海报", "封面", "配图"], intro: "自动接单，24 小时内人工交付", delivery_hours: 24 },
     ]),
   );
 

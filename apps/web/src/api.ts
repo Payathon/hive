@@ -37,6 +37,8 @@ export interface OrderDetail extends OrderSummary {
   sellerName: string | null;
   sellerWorkMode: "agent" | "manual" | null;
   events: { type: string; at: string }[];
+  // The buyer's refund on a failed paid order (电脑网站支付).
+  refund?: { status: "REQUESTED" | "PROCESSING" | "SUCCEEDED" | "FAILED"; amountFen: number } | null;
 }
 
 export interface Me {
@@ -48,6 +50,8 @@ export interface Me {
   // `hive serve` polled in the last minute.
   listenerOnline?: boolean;
   email: string | null;
+  // The seller prices each listing here (电脑网站支付) rather than in Alipay (即刻收).
+  sellerSetsPrice?: boolean;
 }
 
 // One line in the 消息 inbox; every one points at an order.
@@ -138,8 +142,13 @@ export const hive = {
   // Listed from the app, the work is always done by a person.
   upsertListing: (
     category: string,
-    opts: { acceptMode: "auto" | "ask"; deliveryHours: number; dailyLimit: number; tags: string[]; intro: string | null },
+    opts: { acceptMode: "auto" | "ask"; deliveryHours: number; dailyLimit: number; tags: string[]; intro: string | null; priceFen?: number },
   ) => req<Listing>("PUT", `/v1/listings/${category}`, { ...opts, workMode: "manual" }),
+  // Re-prices a listing as it stands, whoever listed it (the app or `hive serve`).
+  setPrice: (l: Listing, priceFen: number) =>
+    req<Listing>("PUT", `/v1/listings/${l.category}`, {
+      acceptMode: l.acceptMode, workMode: l.workMode, deliveryHours: l.deliveryHours, dailyLimit: l.dailyLimit, tags: l.tags, intro: l.intro, priceFen,
+    }),
   paymentSetup: (category: string) => req<PaymentSetup>("POST", `/v1/listings/${category}/payment-setup`, {}),
   setEmail: (email: string | null) => req<{ email: string | null }>("PATCH", "/v1/me", { email }),
   notifications: () => req<Notice[]>("GET", "/v1/notifications"),
