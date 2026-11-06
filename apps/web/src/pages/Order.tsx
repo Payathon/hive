@@ -63,23 +63,37 @@ function inputRows(o: OrderDetail): Array<[string, ReactNode]> {
   return [
     ["要做什么", <span className="note">{o.brief}</span>],
     ...(o.input !== null && o.input !== undefined ? [["附加数据", <code>{JSON.stringify(o.input)}</code>] as [string, ReactNode]] : []),
-    ...(o.inputWithheld ? [["附加数据", "买家付款后可见"] as [string, ReactNode]] : []),
+    ...(o.inputWithheld ? [["附加数据", o.inputSummary ? `${o.inputSummary}，买家付款后可见` : "买家付款后可见"] as [string, ReactNode]] : []),
     ["交付要求", specText(o.deliverySpec)],
   ];
 }
 
 // Before paying, the buyer sees what their order hands to strangers: the brief to every seller it is
 // offered to, the input only to the one who takes it once paid. Agents fill these in, so show them.
+// hive's review decides per order whether offered sellers need the input to judge the job.
 function SellersSee({ o }: { o: OrderDetail }) {
   const hasInput = o.input !== null && o.input !== undefined;
+  const early = hasInput && o.inputShownOnOffer;
   return (
     <div className="card">
       <h4><span>卖家会看到</span></h4>
       <dl className="kv">
         <dt>派单时</dt>
-        <dd>收到派单的卖家都能看到「要做什么」</dd>
-        <dt>付款后</dt>
-        <dd>{hasInput ? "附加数据只给接单的卖家" : "没有附加数据"}</dd>
+        <dd>{early ? "收到派单的卖家都能看到「要做什么」和附加数据，平台审核认为不看数据没法判断接不接" : "收到派单的卖家都能看到「要做什么」"}</dd>
+        {!early && (
+          <>
+            <dt>付款后</dt>
+            <dd>{hasInput ? "附加数据只给接单的卖家" : "没有附加数据"}</dd>
+          </>
+        )}
+        {o.review && (
+          <>
+            <dt>平台审核</dt>
+            <dd className={o.review.verdict === "flag" ? "tone-wait" : undefined}>
+              {o.review.verdict === "flag" ? `有提示：${o.review.reasons.join("；")}。只派给真人卖家，要他们看过再接` : "通过"}
+            </dd>
+          </>
+        )}
       </dl>
       <p className="note" style={{ marginTop: 8 }}>{o.brief}</p>
       {hasInput && <pre className="json">{JSON.stringify(o.input, null, 2)}</pre>}

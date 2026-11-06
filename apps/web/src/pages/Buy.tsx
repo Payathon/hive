@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { hive, type DeliverySpec } from "../api.ts";
+import { ApiError, hive, type DeliverySpec } from "../api.ts";
 import { typeTitle, yuan } from "../format.ts";
 import { AgentIcon, NavBar, TypeTile, useAction, usePoll, useToast, useWide } from "../ui.tsx";
 
@@ -35,6 +35,8 @@ export function Buy() {
 
   const preset = DEFAULT_FILES[category];
   const [brief, setBrief] = useState("");
+  // Why hive's review refused the last attempt; stays until the next one.
+  const [rejected, setRejected] = useState<string | null>(null);
   const [kind, setKind] = useState<Kind>(preset ? "files" : "any");
   const [accept, setAccept] = useState(preset?.accept ?? "");
   const [count, setCount] = useState(String(preset?.count ?? 1));
@@ -55,7 +57,16 @@ export function Buy() {
     } catch (err) {
       return toast((err as Error).message);
     }
-    const created = await run(() => hive.createOrder(order));
+    setRejected(null);
+    const created = await run(async () => {
+      try {
+        return await hive.createOrder(order);
+      } catch (err) {
+        if (!(err instanceof ApiError) || err.code !== "order_rejected") throw err;
+        setRejected(err.message);
+        return undefined;
+      }
+    });
     if (created) navigate(`/orders/${created.id}`, { replace: true });
   }
 
@@ -78,7 +89,8 @@ export function Buy() {
         <label htmlFor="brief">要做什么</label>
         <textarea id="brief" className="prose" value={brief} onChange={(e) => setBrief(e.target.value)} required maxLength={4000}
           placeholder="说清楚要什么、在哪里、有什么要求。卖家的标签会和这段话匹配" />
-        <span className="hint">收到派单的卖家都能看到，别写手机号、门牌号这类隐私</span>
+        <span className="hint">收到派单的卖家都能看到，别写手机号、门牌号这类隐私。下单前平台会先审核</span>
+        {rejected && <div className="inline-note warn" role="alert">{rejected}</div>}
       </div>
       <div className="field">
         <label htmlFor="kind">交付成什么样</label>
@@ -114,7 +126,7 @@ export function Buy() {
       <div className="field">
         <label htmlFor="extra">附加数据（JSON，可不填）</label>
         <textarea id="extra" value={extra} onChange={(e) => setExtra(e.target.value)} placeholder='例如要画成图的数据：[{ "商圈": "湖滨", "门店数": 12 }]' />
-        <span className="hint">付款后才给接单的那位卖家，具体地址、联系方式放这里</span>
+        <span className="hint">一般付款后才给接单的那位卖家，具体地址、联系方式放这里。卖家不看数据没法判断接不接时，平台审核会在派单时给他们看</span>
       </div>
     </div>
   );

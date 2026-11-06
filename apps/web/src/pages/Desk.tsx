@@ -63,6 +63,10 @@ function OfferSheet({ offer, priceFen, onGrab, onSkip, busy }: { offer: OrderSum
             <text x="32" y="37" textAnchor="middle" fontSize="13" fontWeight="600" fill="#1a1a1a">{mmss(left)}</text>
           </svg>
         </div>
+        {offer.inputSummary && <div className="inline-note">附加数据：{offer.inputSummary}，接单付款后可见</div>}
+        {offer.review?.verdict === "flag" && (
+          <div className="inline-note warn">平台审核提示：{offer.review.reasons.join("；")}。确认没问题再接，你的 agent 不会自动接这单</div>
+        )}
         {offer.createdByActor === "agent" && (
           <div className="inline-note"><AgentIcon small />这单由买家的 agent 发起，付款由买家本人确认</div>
         )}
@@ -217,10 +221,11 @@ export function Desk() {
   }
   async function grab(o: OrderSummary) {
     try {
-      await hive.action(o.id, "accept-offer");
+      // The sheet showed any review warning, so a flagged order can be taken here.
+      await hive.action(o.id, "accept-offer", { reviewSeen: true });
       navigate(`/orders/${o.id}`);
     } catch (err) {
-      toast(err instanceof ApiError && err.status === 409 ? "慢了一步，这单已经被别人接了" : String((err as Error).message));
+      toast(err instanceof ApiError && err.status === 409 && err.code !== "needs_owner_approval" ? "慢了一步，这单已经被别人接了" : String((err as Error).message));
       setSkipped(new Set(skipped).add(o.id));
     }
   }
