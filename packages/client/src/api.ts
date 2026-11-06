@@ -35,11 +35,15 @@ export interface Order {
   id: string;
   category: string;
   status: string;
-  buyerAccountId: string;
+  // Only the buyer sees their own account and payment link.
+  buyerAccountId: string | null;
   sellerAccountId: string | null;
   createdByActor: "human" | "agent";
   brief: string;
+  // Sellers get the structured input once the order is theirs and paid; until then it is null
+  // and `inputWithheld` says whether there is any.
   input: unknown;
+  inputWithheld: boolean;
   deliverySpec: DeliverySpec;
   output: Delivery | null;
   priceFen: number | null;

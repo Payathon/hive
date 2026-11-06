@@ -569,6 +569,29 @@ describe("payment and failure", () => {
     const stranger = await t.account("stranger");
     expect((await t.call("GET", `/v1/orders/${order.id}`, stranger.token)).status).toBe(404);
   });
+
+  it("shows sellers the brief on offer and the input only once the order is theirs and paid", async () => {
+    const t = await setup();
+    const seller = await t.agentSeller("s", DATA, 500);
+    const buyer = await t.account("buyer");
+    const o = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
+
+    const [offer] = (await t.ok("GET", "/v1/seller/poll", seller.agent)).offers;
+    expect(offer).toMatchObject({ brief: orders[DATA].brief, input: null, inputWithheld: true, buyerAccountId: null });
+    const accepted = await t.ok("POST", `/v1/orders/${o.id}/accept-offer`, seller.agent);
+    expect(accepted).toMatchObject({ status: "AWAITING_PAYMENT", input: null, purchaseUrl: null, purchaseQrCode: null, buyerAccountId: null });
+    // The buyer sees everything, including what they'll pay with.
+    const mine = await t.ok("GET", `/v1/orders/${o.id}`, buyer.token);
+    expect(mine).toMatchObject({ input: orders[DATA].input, inputWithheld: false, buyerAccountId: buyer.id });
+    expect(mine.purchaseUrl).toBeTruthy();
+
+    await t.pay(o);
+    await t.ok("POST", `/v1/orders/${o.id}/check-payment`, buyer.token);
+    const [work] = (await t.ok("GET", "/v1/seller/poll", seller.agent)).work;
+    expect(work).toMatchObject({ id: o.id, input: orders[DATA].input, inputWithheld: false, buyerAccountId: null, purchaseUrl: null });
+    const [listed] = await t.ok("GET", "/v1/orders?role=seller", seller.token);
+    expect(listed.input).toEqual(orders[DATA].input);
+  });
 });
 
 describe("delivered files", () => {

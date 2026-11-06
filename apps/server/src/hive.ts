@@ -597,7 +597,8 @@ export class Hive {
       .select()
       .from(orders)
       .where(and(eq(orders.sellerAccountId, accountId), inArray(orders.status, RESERVING)));
-    return { offers: offers.map(publicOrder), work: work.map(publicOrder) };
+    const view = (r: OrderRow) => publicOrder(r, accountId);
+    return { offers: offers.map(view), work: work.map(view) };
   }
 
   private waitFor(accountId: string, ms: number) {
@@ -618,7 +619,7 @@ export class Hive {
     const row = await this.loadOrder(orderId);
     const visible = row.buyerAccountId === p.accountId || row.sellerAccountId === p.accountId || row.offeredTo.includes(p.accountId);
     if (!visible) throw new HiveError(404, "order_not_found", "order not found");
-    return publicOrder(row);
+    return publicOrder(row, p.accountId);
   }
 
   // One order with what the order page shows: the seller's name and the applied transitions.
@@ -690,7 +691,7 @@ export class Hive {
   async listOrders(p: Principal, role: "buyer" | "seller") {
     const col = role === "buyer" ? orders.buyerAccountId : orders.sellerAccountId;
     const rows = await this.db.select().from(orders).where(eq(col, p.accountId)).orderBy(desc(orders.createdAt)).limit(100);
-    return rows.map(publicOrder);
+    return rows.map((r) => publicOrder(r, p.accountId));
   }
 
   // Money that actually moved: paid orders, from either side.
@@ -1075,28 +1076,34 @@ export class Hive {
   }
 }
 
-// Order as exposed over the API.
+// Order as exposed over the API, to `viewerId`.
 // Delivered files carry a download link relative to the API's origin.
 export const fileRef = (f: DeliveredFile) => ({ ...f, url: `/v1/files/${f.id}` });
 
-export function publicOrder(r: OrderRow) {
+// Like a delivery app showing the rider the job before they take it and the address after: a seller
+// sees the brief when offered, the structured input only once the order is theirs and paid, and never
+// the buyer's account or payment link.
+export function publicOrder(r: OrderRow, viewerId: string) {
   const output = r.output as Delivery | null;
+  const buyer = r.buyerAccountId === viewerId;
+  const working = r.sellerAccountId === viewerId && r.paidAt !== null;
   return {
     id: r.id,
     category: r.category,
     status: r.status,
-    buyerAccountId: r.buyerAccountId,
+    buyerAccountId: buyer ? r.buyerAccountId : null,
     sellerAccountId: r.sellerAccountId,
     createdByActor: r.createdByActor,
     brief: r.brief,
-    input: r.input,
+    input: buyer || working ? r.input : null,
+    inputWithheld: !buyer && !working && r.input !== null,
     deliverySpec: r.deliverySpec,
     output: output && { ...output, files: (output.files ?? []).map(fileRef) },
     priceFen: r.priceFen,
     deadline: r.deadline,
     offerKind: r.offerKind,
-    purchaseUrl: r.purchaseUrl,
-    purchaseQrCode: r.purchaseQrCode,
+    purchaseUrl: buyer ? r.purchaseUrl : null,
+    purchaseQrCode: buyer ? r.purchaseQrCode : null,
     paidAt: r.paidAt,
     deliveryAttempts: r.deliveryAttempts,
     lastDeliveryError: r.lastDeliveryError,

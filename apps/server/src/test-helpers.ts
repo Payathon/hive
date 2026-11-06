@@ -1,6 +1,8 @@
+import { eq } from "drizzle-orm";
 import { fen } from "@hive/core";
 import { createApp } from "./app.ts";
 import { connectTestDb } from "./db/client.ts";
+import { orders as ordersTable } from "./db/schema.ts";
 import { Hive, type HiveOptions } from "./hive.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 
@@ -113,9 +115,12 @@ export async function setup(opts: Pick<HiveOptions, "mailer" | "push"> = {}) {
     return { ...human, listingId: listing.id as string };
   }
 
-  // What the buyer's tap in Alipay does in the fake provider.
-  async function pay(order: { purchaseUrl: string }) {
-    const res = await app.request(order.purchaseUrl, { method: "POST" });
+  // What the buyer's tap in Alipay does in the fake provider. Takes any view of the order: only the
+  // buyer's carries the payment link, so it is read from the row.
+  async function pay(order: { id: string }) {
+    const [row] = await hive.db.select({ url: ordersTable.purchaseUrl }).from(ordersTable).where(eq(ordersTable.id, order.id));
+    if (!row?.url) throw new Error(`order ${order.id} has no payment link`);
+    const res = await app.request(row.url, { method: "POST" });
     if (res.status !== 200) throw new Error(`fake pay failed: ${res.status}`);
   }
 
