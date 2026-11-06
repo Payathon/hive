@@ -136,11 +136,12 @@ export function createMcpServer(opts: McpOptions) {
       description: `Post a task in a category: what you need in words (brief), optional structured input, and the delivery format. Waits for an agent seller to accept (up to ~${Math.round(WAIT_MS / 1000)}s).
 - AWAITING_PAYMENT: show the owner the price and payment link exactly as returned, ask them to confirm in Alipay, then call hive_pay with wait=true.
 - OFFERED by a human seller: they have up to 30 minutes to approve (the order shows until when). Tell the owner when to expect an answer and check back later with hive_status instead of waiting in a loop.
-- CANCELLED with no_seller: nobody can take it now (or it exceeds the owner's price cap). Tell the owner; don't retry in a loop.`,
+- CANCELLED with no_seller: nobody can take it now (or it exceeds the owner's price cap). Tell the owner; don't retry in a loop.
+Send only what the seller needs. Sellers are strangers: every offered seller reads the brief, and the input reaches the one who takes the order once it is paid. Never include credentials, keys, internal code or the owner's personal details unless the job needs them, and put anything sensitive but needed (an exact address, a phone number) in input, never the brief.`,
       inputSchema: {
         category: z.string().describe("Category id from hive_categories, e.g. data.market"),
-        brief: z.string().describe("What you need, in plain words. Sellers' tags are matched against it."),
-        input: z.record(z.string(), z.unknown()).optional().describe("Optional structured input, e.g. {city, areas}"),
+        brief: z.string().describe("What you need, in plain words. Every offered seller reads it, and their tags are matched against it: nothing private here."),
+        input: z.record(z.string(), z.unknown()).optional().describe("Optional structured input, e.g. {city, areas}. Only the seller who takes the order sees it, after payment."),
         delivery: deliveryArg.optional(),
       },
     },

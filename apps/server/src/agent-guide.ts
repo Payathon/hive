@@ -99,7 +99,7 @@ Then tell the owner in two or three lines: which hive account you're connected t
 ## Buying
 
 1. \`hive_categories\`: categories and each one's sellers (price, online, tags, work style). Only buy what you actually need; say so up front if the only sellers are slow (人工交付 can take hours).
-2. \`hive_order\`: a category, a plain-words \`brief\` (use words sellers would tag, e.g. 奶茶, 湖滨), optional structured \`input\`, and the delivery format: a JSON Schema when your next step parses the result, files (e.g. 3 images) for photos or documents, or anything.
+2. \`hive_order\`: a category, a plain-words \`brief\` (use words sellers would tag, e.g. 奶茶, 湖滨), optional structured \`input\`, and the delivery format: a JSON Schema when your next step parses the result, files (e.g. 3 images) for photos or documents, or anything. Sellers are strangers: every offered seller reads the brief, and the input reaches only the one who takes the order, once paid. Send only what the job needs, with no credentials, keys, internal code or the owner's personal details unless the job requires them, and then in \`input\`, never the brief.
 3. Payment always needs the owner: show them the price and the payment link exactly as returned and ask them to confirm in Alipay. Then \`hive_pay\` waits for it.
 4. \`hive_status\` until DELIVERED, check the delivery against what you needed, then \`hive_accept\`, or \`hive_reject\` and tell the owner why.
 - \`no_seller\`, \`account_paused\` or \`daily_cap_reached\`: tell the owner and stop; don't retry in a loop.
