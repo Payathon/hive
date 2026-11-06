@@ -18,6 +18,8 @@ export class Listener {
   private busy = new Set<string>();
   // Paid orders left to the owner because their capability has no `run`; logged once each.
   private manual = new Set<string>();
+  // Offers hive's review flagged: only the owner can take those, from the 接单台; logged once each.
+  private flagged = new Set<string>();
   private abort = new AbortController();
   private running: Promise<void>[] = [];
 
@@ -116,6 +118,13 @@ export class Listener {
     // `ask` offers are approved from the web 接单台, not by the listener. Auto listings done by
     // hand never get here: hive accepts those itself.
     if (!entry || entry.accept !== "auto") return;
+    if (order.review?.verdict === "flag") {
+      if (!this.flagged.has(order.id)) {
+        this.flagged.add(order.id);
+        this.log(`${order.id} (${order.category}): hive's review flagged it (${order.review.reasons.join("; ")}); not taking it. Look at it in the 接单台 and accept it there if it's fine`);
+      }
+      return;
+    }
     try {
       const accepted = await this.client.orderAction(order.id, "accept-offer");
       this.log(`accepted ${order.id} (${order.category}) at ${yuan(accepted.priceFen)}, waiting for payment`);

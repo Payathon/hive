@@ -626,7 +626,7 @@ describe("platform review", () => {
     const buyer = await t.account("buyer");
     await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
     const [offer] = (await t.ok("GET", "/v1/seller/poll", seller.agent)).offers;
-    expect(offer).toMatchObject({ input: orders[DATA].input, inputWithheld: false, inputSummary: null, review: null });
+    expect(offer).toMatchObject({ input: orders[DATA].input, inputWithheld: false, inputSummary: null, inputShownOnOffer: true, review: null });
 
     const t2 = await setup({ reviewer: stub({}) });
     const seller2 = await t2.agentSeller("s", DATA, 500);

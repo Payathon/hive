@@ -78,6 +78,7 @@ const WHY: Record<string, string> = {
 export function describe(o: Order, opts: { reviewHint?: string; base: string }): string {
   const reviewHint = opts.reviewHint ?? `review with: hive accept ${o.id}  |  hive reject ${o.id}`;
   const lines = [`${o.id}  ${o.status}  ${o.category}  ${yuan(o.priceFen)}`];
+  if (o.review?.verdict === "flag") lines.push(`hive review: ${o.review.reasons.join("; ")} (only a person can take this order)`);
   if (o.status === "OFFERED") lines.push(offerLine(o));
   if (o.status === "AWAITING_PAYMENT") lines.push(paymentPrompt(o));
   if (o.status === "DELIVERED") lines.push("delivery:", ...deliveryText(o, opts.base), reviewHint);

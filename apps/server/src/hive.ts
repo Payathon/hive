@@ -1130,6 +1130,8 @@ export function publicOrder(r: OrderRow, viewerId: string) {
     input: seesInput ? r.input : null,
     inputWithheld: !seesInput && r.input !== null,
     inputSummary: !seesInput && r.input !== null ? (review?.inputSummary ?? null) : null,
+    // Whether offered sellers get the input, so the buyer knows before paying.
+    inputShownOnOffer: r.input !== null && review?.discloseInput === true,
     // Sellers see the review only when it warns them; the buyer always sees it.
     review: review && (buyer || review.verdict !== "allow") ? { verdict: review.verdict, reasons: review.reasons } : null,
     deliverySpec: r.deliverySpec,

@@ -40,10 +40,15 @@ export interface Order {
   sellerAccountId: string | null;
   createdByActor: "human" | "agent";
   brief: string;
-  // Sellers get the structured input once the order is theirs and paid; until then it is null
-  // and `inputWithheld` says whether there is any.
+  // Sellers get the structured input once the order is theirs and paid (or on offer, when hive's
+  // review says they can't judge the job without it); until then it is null, `inputWithheld` says
+  // whether there is any and `inputSummary` describes its shape.
   input: unknown;
   inputWithheld: boolean;
+  inputSummary: string | null;
+  inputShownOnOffer: boolean;
+  // hive's review at creation. The buyer always sees it; sellers only when it is a warning.
+  review: { verdict: "allow" | "flag"; reasons: string[] } | null;
   deliverySpec: DeliverySpec;
   output: Delivery | null;
   priceFen: number | null;
