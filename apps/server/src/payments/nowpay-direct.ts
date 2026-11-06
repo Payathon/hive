@@ -6,7 +6,7 @@ import {
   type ChargeState,
   type ChargeStatus,
   type ConsumeStatus,
-  type PaymentProvider,
+  type QuotaPaymentProvider,
   type ProductRef,
   type Purchase,
 } from "./provider.ts";
@@ -68,7 +68,8 @@ export function directOption(options: readonly DirectChargingOption[], skuId?: s
   return options.find((o) => Number(o.quota_amount) === 1) ?? null;
 }
 
-export class NowPayDirectProvider implements PaymentProvider {
+export class NowPayDirectProvider implements QuotaPaymentProvider {
+  readonly kind = "quota";
   readonly name = "nowpay-direct";
   private sdk: AlipaySdk;
   private charges = new Map<string, { at: number; state: Promise<ChargeState> }>();

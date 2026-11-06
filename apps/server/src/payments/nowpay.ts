@@ -5,7 +5,7 @@ import {
   type ChargeState,
   type ChargeStatus,
   type ConsumeStatus,
-  type PaymentProvider,
+  type QuotaPaymentProvider,
   type ProductRef,
   type Purchase,
 } from "./provider.ts";
@@ -61,7 +61,8 @@ export function singleCountOption(options: readonly ChargingOption[]): ChargingO
   );
 }
 
-export class NowPayProvider implements PaymentProvider {
+export class NowPayProvider implements QuotaPaymentProvider {
+  readonly kind = "quota";
   readonly name = "nowpay-platform";
   private sdk: AlipaySdk;
 

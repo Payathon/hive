@@ -12,6 +12,7 @@ import { mailerFromEnv } from "./mail.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 import { NowPayProvider } from "./payments/nowpay.ts";
 import { NowPayDirectProvider, type DirectProduct } from "./payments/nowpay-direct.ts";
+import { ALIPAY_SANDBOX_GATEWAY, PagePayProvider } from "./payments/pagepay.ts";
 import type { PaymentProvider } from "./payments/provider.ts";
 import { pushFromEnv } from "./push.ts";
 import { reviewerFromEnv } from "./review/deepseek.ts";
@@ -23,14 +24,14 @@ const port = Number(process.env.PORT ?? 8787);
 const baseUrl = process.env.PUBLIC_URL ?? `http://localhost:${port}`;
 const TICK_MS = Number(process.env.TICK_MS ?? 5000);
 
-// PAYMENTS=direct | platform | fake. Unset: direct when its credentials and product are present,
-// otherwise fake. Direct mode (即刻收直连) is the default for real money; platform mode is kept for later.
+// PAYMENTS=pagepay | direct | platform | fake. Unset: pagepay (电脑网站支付) when the Alipay app's
+// credentials are present, otherwise fake. 即刻收 direct and platform modes stay for later.
 // Key material may be given inline (ALIPAY_PRIVATE_KEY) or as a file (ALIPAY_PRIVATE_KEY_PATH).
 const env = (k: string) => process.env[k] || (process.env[`${k}_PATH`] ? readFileSync(process.env[`${k}_PATH`]!, "utf8").trim() : undefined);
-const directReady = () => Boolean(env("ALIPAY_APP_ID") && env("ALIPAY_PRIVATE_KEY") && env("ALIPAY_PUBLIC_KEY") && process.env.NOWPAY_DIRECT_PRODUCT_ID);
+const alipayReady = () => Boolean(env("ALIPAY_APP_ID") && env("ALIPAY_PRIVATE_KEY") && env("ALIPAY_PUBLIC_KEY"));
 
 function paymentsFromEnv(): PaymentProvider {
-  const mode = process.env.PAYMENTS === "nowpay" ? "platform" : (process.env.PAYMENTS ?? (directReady() ? "direct" : "fake"));
+  const mode = process.env.PAYMENTS === "nowpay" ? "platform" : (process.env.PAYMENTS ?? (alipayReady() ? "pagepay" : "fake"));
   if (mode === "fake") return new FakePaymentProvider(baseUrl, undefined, process.env.FAKE_PAY_STATE ?? ".data/fake-pay.json");
   const need = (k: string) => {
     const v = env(k);
@@ -43,8 +44,18 @@ function paymentsFromEnv(): PaymentProvider {
     alipayPublicKey: need("ALIPAY_PUBLIC_KEY"),
     ...(process.env.ALIPAY_GATEWAY ? { gateway: process.env.ALIPAY_GATEWAY } : {}),
   };
+  if (mode === "pagepay") {
+    // The sandbox unless ALIPAY_GATEWAY says otherwise; Alipay can only post results to https.
+    const provider = new PagePayProvider({
+      ...keys,
+      gateway: process.env.ALIPAY_GATEWAY ?? ALIPAY_SANDBOX_GATEWAY,
+      notifyUrl: baseUrl.startsWith("https://") ? `${baseUrl}/v1/payments/alipay/notify` : undefined,
+    });
+    console.log(`电脑网站支付: app ${keys.appId} via ${provider.gateway}${baseUrl.startsWith("https://") ? "" : " (no notify_url: http, query only)"}`);
+    return provider;
+  }
   if (mode === "platform") return new NowPayProvider({ ...keys, callbackUrl: `${baseUrl}/nowpay/return` });
-  if (mode !== "direct") throw new Error(`PAYMENTS must be direct, platform or fake, not ${mode}`);
+  if (mode !== "direct") throw new Error(`PAYMENTS must be pagepay, direct, platform or fake, not ${mode}`);
   // NOWPAY_DIRECT_PRODUCTS: optional JSON {"<category>": "<product id>" | {"productId", "skuId"}}.
   const byCategory: Record<string, DirectProduct> = {};
   for (const [cat, v] of Object.entries(JSON.parse(process.env.NOWPAY_DIRECT_PRODUCTS ?? "{}") as Record<string, string | DirectProduct>)) {
@@ -115,6 +126,14 @@ if (payments instanceof NowPayDirectProvider) {
     .syncListingPayments()
     .then((n) => console.log(`即刻收直连: ${n} listing(s) can take payment`))
     .catch((err) => console.error(`即刻收直连: listing payment sync failed, listings keep their old status: ${(err as Error).message}`));
+}
+
+// 电脑网站支付: a listing takes payment once it has a price (listings priced under fake payments keep theirs).
+if (payments instanceof PagePayProvider) {
+  hive
+    .syncListingPayments()
+    .then((n) => console.log(`电脑网站支付: ${n} listing(s) can take payment`))
+    .catch((err) => console.error(`电脑网站支付: listing payment sync failed: ${(err as Error).message}`));
 }
 
 let ticking = false;

@@ -5,7 +5,7 @@ import { HiveClient } from "@hive/client/api";
 import { createMcpServer } from "@hive/client/mcp";
 import { readFile } from "node:fs/promises";
 import { agentGuide } from "./agent-guide.ts";
-import { Hive, HiveError, MAX_FILE_BYTES, type Principal } from "./hive.ts";
+import { Hive, HiveError, MAX_FILE_BYTES, MAX_PRICE_FEN, MIN_PRICE_FEN, type Principal } from "./hive.ts";
 import { OutboxMailer } from "./mail.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
 
@@ -87,6 +87,14 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
   });
 
   // Sign-up takes only a name; the token it returns is the owner's login.
+  // Alipay's asynchronous payment notification (电脑网站支付). Form-encoded and signed; anything that
+  // doesn't verify gets "fail" and changes nothing. The order's state is re-read from Alipay.
+  app.post("/v1/payments/alipay/notify", async (c) => {
+    const form = await c.req.parseBody();
+    const params = Object.fromEntries(Object.entries(form).filter((e): e is [string, string] => typeof e[1] === "string"));
+    return c.text((await hive.paymentNotification(params)) ? "success" : "fail");
+  });
+
   app.post("/v1/accounts", async (c) => {
     const { name } = await body(c, z.object({ name: z.string().min(1).max(64) }));
     return c.json(await hive.createAccount(name), 201);
@@ -168,6 +176,8 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
       // Whether `hive serve` polled lately; the 接单台 nudges sellers to connect an agent when it hasn't.
       listenerOnline: hive.isListenerOnline(a),
       email: a.email,
+      // 电脑网站支付: sellers price their own listings; with 即刻收 prices are set in Alipay.
+      sellerSetsPrice: hive.payments.kind === "trade",
     });
   });
 
@@ -206,6 +216,8 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
         tags: z.array(z.string().max(20)).max(10).optional(),
         intro: z.string().max(200).nullable().optional(),
         active: z.boolean().optional(),
+        // 电脑网站支付 only: the seller's price per order, in fen.
+        priceFen: z.number().int().min(MIN_PRICE_FEN).max(MAX_PRICE_FEN).nullable().optional(),
       }),
     );
     return c.json(await hive.upsertListing(me(c), c.req.param("category"), opts));

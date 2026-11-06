@@ -5,6 +5,7 @@ import { connectTestDb } from "./db/client.ts";
 import { orders as ordersTable } from "./db/schema.ts";
 import { Hive, type HiveOptions } from "./hive.ts";
 import { FakePaymentProvider } from "./payments/fake.ts";
+import type { PaymentProvider } from "./payments/provider.ts";
 
 export const BASE = "http://hive.test";
 
@@ -34,10 +35,12 @@ export const orders = {
 
 export const validDelivery = { data: { stores: [{ name: "一点点", area: "湖滨", address: "平海路 1 号" }], source: "seed" } };
 
-export async function setup(opts: Pick<HiveOptions, "mailer" | "push" | "reviewer"> = {}) {
+// Fake 即刻收 unless a test passes its own provider (e.g. 电脑网站支付 against a stand-in gateway).
+export async function setup(opts: Pick<HiveOptions, "mailer" | "push" | "reviewer" | "webUrl"> & { payments?: PaymentProvider } = {}) {
   let now = new Date("2026-10-14T02:00:00Z");
-  const payments = new FakePaymentProvider(BASE);
-  const hive = new Hive({ db: await connectTestDb(), payments, clock: () => now, webUrl: "http://web.test", ...opts });
+  const fake = new FakePaymentProvider(BASE);
+  const { payments: custom, ...rest } = opts;
+  const hive = new Hive({ db: await connectTestDb(), payments: custom ?? fake, clock: () => now, webUrl: "http://web.test", ...rest });
   const app = createApp(hive);
 
   async function call(method: string, path: string, token?: string, body?: unknown) {
@@ -84,12 +87,15 @@ export async function setup(opts: Pick<HiveOptions, "mailer" | "push" | "reviewe
     return { status: res.status, body: text ? JSON.parse(text) : null };
   }
 
+  // 即刻收 prices come from Alipay (here the fake); with 电脑网站支付 the seller sets them on the listing.
+  const sellerPrice = (priceFen: number) => (custom?.kind === "trade" ? { priceFen } : {});
+
   // An agent seller with a priced, enabled listing whose listener is online.
   async function agentSeller(name: string, category: string, priceFen = 500, tags: string[] = []) {
     const human = await account(name);
     const agent = await agentToken(human.token);
-    const listing = await ok("PUT", `/v1/listings/${category}`, agent, { acceptMode: "auto", dailyLimit: 10, tags });
-    payments.setPrice(listing.id, fen(priceFen));
+    const listing = await ok("PUT", `/v1/listings/${category}`, agent, { acceptMode: "auto", dailyLimit: 10, tags, ...sellerPrice(priceFen) });
+    fake.setPrice(listing.id, fen(priceFen));
     await ok("POST", `/v1/listings/${category}/payment-setup`, agent);
     await ok("GET", "/v1/seller/poll", agent);
     return { ...human, agent, listingId: listing.id as string };
@@ -108,8 +114,9 @@ export async function setup(opts: Pick<HiveOptions, "mailer" | "push" | "reviewe
       workMode: "manual",
       deliveryHours: opts.deliveryHours ?? 2,
       dailyLimit: 5,
+      ...sellerPrice(priceFen),
     });
-    payments.setPrice(listing.id, fen(priceFen));
+    fake.setPrice(listing.id, fen(priceFen));
     await ok("POST", `/v1/listings/${category}/payment-setup`, human.token);
     await ok("POST", "/v1/seller/accepting", human.token, { on: true });
     return { ...human, listingId: listing.id as string };
@@ -127,7 +134,7 @@ export async function setup(opts: Pick<HiveOptions, "mailer" | "push" | "reviewe
   return {
     hive,
     app,
-    payments,
+    payments: fake,
     call,
     ok,
     upload,

@@ -5,7 +5,7 @@ import {
   RefundNotImplemented,
   type ChargeState,
   type ConsumeStatus,
-  type PaymentProvider,
+  type QuotaPaymentProvider,
   type ProductRef,
   type Purchase,
 } from "./provider.ts";
@@ -15,7 +15,8 @@ const quotaKey = (productId: string, buyerId: string) => `${productId}\u0000${bu
 // In-memory stand-in for 即刻收, used in tests and local runs without Alipay credentials.
 // Products are ENABLED immediately at a default price; purchases complete via completePurchase().
 // With a statePath, purchases and counts survive restarts (local runs reload on every edit).
-export class FakePaymentProvider implements PaymentProvider {
+export class FakePaymentProvider implements QuotaPaymentProvider {
+  readonly kind = "quota";
   readonly name = "fake";
   private prices = new Map<string, Fen>();
   private purchases = new Map<string, { productId: string; buyerId: string; completed: boolean }>();

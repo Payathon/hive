@@ -21,11 +21,11 @@ import {
   type WorkMode,
 } from "@hive/core";
 import type { Db } from "./db/client.ts";
-import { accounts, categories, deviceLogins, files, listings, notifications, orderEvents, orders, pushSubscriptions, tokens } from "./db/schema.ts";
+import { accounts, categories, deviceLogins, files, listings, notifications, orderEvents, orders, pushSubscriptions, refunds, tokens } from "./db/schema.ts";
 import { MemoryFileStore, type FileStore } from "./files.ts";
 import { OutboxMailer, type Mailer } from "./mail.ts";
 import { lockOrder, orderColumns, rowToOrder, saveTransition, type OrderRow } from "./orders-repo.ts";
-import type { PaymentProvider, ProductRef } from "./payments/provider.ts";
+import type { ChargeState, PaymentProvider, ProductRef } from "./payments/provider.ts";
 import type { PushMessage, PushSender, PushTarget } from "./push.ts";
 import { RuleReviewer } from "./review/rules.ts";
 import { runReview, type OrderReview, type Reviewer } from "./review/reviewer.ts";
@@ -75,6 +75,10 @@ export function startOfShanghaiDay(now: Date): Date {
   return new Date(shifted.getTime() - 8 * 3600_000);
 }
 
+// Seller-set prices (电脑网站支付): from one fen to ¥10,000 an order.
+export const MIN_PRICE_FEN = 1;
+export const MAX_PRICE_FEN = 1_000_000;
+
 // Orders that have been paid for but whose count hasn't been consumed yet.
 const RESERVING: OrderRow["status"][] = ["PAID", "IN_PROGRESS"];
 // Orders whose price counts against the buyer's daily cap.
@@ -104,6 +108,7 @@ const NOTICE_TITLE: Record<string, string> = {
   completed: "订单完成",
   cancelled: "订单已取消",
   held: "有一单要你手动交付",
+  refunded: "已退款",
 };
 // People read these in push and mail, so reasons are spelled out (same words as the web order page).
 const FAIL_TEXT: Record<string, string> = { work_timeout: "卖家没有按时交付", seller_abandoned: "卖家放弃了这单", heartbeat_lost: "卖家的 agent 掉线了" };
@@ -315,6 +320,8 @@ export class Hive {
       tags?: string[] | undefined;
       intro?: string | null | undefined;
       active?: boolean | undefined;
+      // Only with 电脑网站支付, where the seller sets the price; 即刻收 prices come from Alipay.
+      priceFen?: number | null | undefined;
     },
   ) {
     const cat = await this.getCategory(category);
@@ -329,6 +336,9 @@ export class Hive {
       tags: [...new Set((opts.tags ?? []).map((t) => t.trim()).filter(Boolean))],
       intro: opts.intro?.trim() || null,
       active: opts.active ?? true,
+      ...(this.payments.kind === "trade" && opts.priceFen !== undefined
+        ? { priceFen: opts.priceFen, paymentStatus: opts.priceFen === null ? "NOT_CONFIGURED" : "ENABLED" }
+        : {}),
     };
     const [row] = await this.db
       .insert(listings)
@@ -359,6 +369,7 @@ export class Hive {
       .from(listings)
       .where(and(eq(listings.sellerAccountId, p.accountId), eq(listings.category, category)));
     if (!listing) throw new HiveError(404, "listing_not_found", "list in this category first");
+    if (this.payments.kind === "trade") return tradeChargeState(listing);
     const state = await this.payments.setupProduct(await this.productRef(listing));
     await this.db
       .update(listings)
@@ -372,7 +383,7 @@ export class Hive {
   async syncListingPayments() {
     let enabled = 0;
     for (const listing of await this.db.select().from(listings)) {
-      const state = await this.payments.setupProduct(await this.productRef(listing));
+      const state = this.payments.kind === "trade" ? tradeChargeState(listing) : await this.payments.setupProduct(await this.productRef(listing));
       await this.db
         .update(listings)
         .set({ paymentStatus: state.status, priceFen: state.priceFen, skuId: state.skuId })
@@ -468,6 +479,8 @@ export class Hive {
 
   async cancelOrder(p: Principal, orderId: string) {
     await this.requireBuyer(p, orderId);
+    // A trade the buyer already paid can't be cancelled; it becomes a paid order instead.
+    if (await this.closeUnpaidTrade(orderId)) throw new HiveError(409, "already_paid", "这单已经付款了，不能取消");
     await this.apply(orderId, { type: "buyer_cancel" });
     return this.getOrder(p, orderId);
   }
@@ -585,16 +598,19 @@ export class Hive {
       const saved = await this.loadOrder(orderId);
       throw new HiveError(422, "invalid_output", saved.lastDeliveryError ?? "the delivery doesn't have the format the buyer asked for");
     }
-    // Consume the paid count before accepting the delivery; quota.verify is idempotent on the request number.
-    const listing = await this.listingFor(row);
-    const status = await this.payments.consume({
-      requestNo: `consume_${orderId}`,
-      product: await this.productRef(listing),
-      buyerId: row.buyerAccountId,
-      reason: `hive ${order.category} ${orderId}`,
-    });
-    if (status === "PROCESSING") throw new HiveError(409, "consume_processing", "payment consumption pending, retry shortly");
-    if (status !== "SUCCEEDED") throw new HiveError(502, "consume_failed", `could not consume the paid count: ${status}`);
+    // 即刻收: consume the paid count before accepting the delivery; quota.verify is idempotent on the
+    // request number. 电脑网站支付 has nothing to consume: the trade already settled the order.
+    if (this.payments.kind === "quota") {
+      const listing = await this.listingFor(row);
+      const status = await this.payments.consume({
+        requestNo: `consume_${orderId}`,
+        product: await this.productRef(listing),
+        buyerId: row.buyerAccountId,
+        reason: `hive ${order.category} ${orderId}`,
+      });
+      if (status === "PROCESSING") throw new HiveError(409, "consume_processing", "payment consumption pending, retry shortly");
+      if (status !== "SUCCEEDED") throw new HiveError(502, "consume_failed", `could not consume the paid count: ${status}`);
+    }
     await this.apply(orderId, { type: "delivery_submitted", output });
     return this.getOrder(p, orderId);
   }
@@ -679,7 +695,9 @@ export class Hive {
           .from(listings)
           .where(and(eq(listings.sellerAccountId, order.sellerAccountId), eq(listings.category, order.category)))
       : [];
-    return { ...order, sellerName: seller?.name ?? null, sellerWorkMode: listing?.workMode ?? null, events };
+    // Refunds are the buyer's business only.
+    const refund = order.buyerAccountId === p.accountId ? await this.refundFor(orderId) : null;
+    return { ...order, sellerName: seller?.name ?? null, sellerWorkMode: listing?.workMode ?? null, events, refund };
   }
 
   // Public catalog: every category with its sellable listings, cheapest and most reliable first.
@@ -833,6 +851,16 @@ export class Hive {
     for (const { id } of expired) {
       const row = await this.loadOrder(id);
       const event = expiryEvent(rowToOrder(row), now);
+      // Shut the trade before giving up on payment: a buyer who paid at the last second gets a
+      // paid order, and a gateway hiccup leaves the order for the next tick rather than cancelling.
+      if (event?.type === "payment_expired") {
+        try {
+          if (await this.closeUnpaidTrade(id)) continue;
+        } catch (err) {
+          console.error(`closing the trade for ${id} failed`, err);
+          continue;
+        }
+      }
       if (event) await this.apply(id, event);
       if (event?.type === "offer_expired") await this.dispatch(id);
     }
@@ -840,7 +868,14 @@ export class Hive {
     await this.redispatchWaiting();
 
     const awaiting = await this.db.select({ id: orders.id }).from(orders).where(eq(orders.status, "AWAITING_PAYMENT"));
-    for (const { id } of awaiting) await this.detectPayment(id);
+    for (const { id } of awaiting) {
+      try {
+        await this.detectPayment(id);
+      } catch (err) {
+        console.error(`checking payment for ${id} failed`, err);
+      }
+    }
+    await this.retryRefunds();
 
     // Fully automatic sellers must keep polling while they hold a paid order; anything a person
     // works on (approved or by hand) runs on its deadline alone.
@@ -904,6 +939,8 @@ export class Hive {
       return saveTransition(tx, row, result.order, event, now, extra);
     });
     await this.announce(saved, event);
+    // A refund that can't go out now is retried by the sweeper; the failure itself stands either way.
+    if (event.type === "work_failed") await this.refundFailed(saved).catch((err) => console.error(`refund for ${id} failed`, err));
     return saved;
   }
 
@@ -992,6 +1029,7 @@ export class Hive {
   private async requestPayment(id: string) {
     const row = await this.loadOrder(id);
     if (row.status !== "ACCEPTED") return;
+    if (this.payments.kind === "trade") return this.requestTrade(row);
     const listing = await this.listingFor(row);
     const requestNo = `purchase_${id}`;
     const purchase = await this.payments.createPurchase({
@@ -1016,12 +1054,17 @@ export class Hive {
   private async detectPayment(id: string) {
     const first = await this.loadOrder(id);
     if (first.status !== "AWAITING_PAYMENT") return;
+    const quota = this.payments;
+    if (quota.kind === "trade") {
+      await this.detectTrade(id);
+      return;
+    }
     const product = await this.productRef(await this.listingFor(first));
-    const key = this.payments.quotaKey(product);
+    const key = quota.quotaKey(product);
     await this.claimLock(`${first.buyerAccountId}\u0000${key}`, async () => {
       const row = await this.loadOrder(id);
       if (row.status !== "AWAITING_PAYMENT") return;
-      const remaining = await this.payments.remainingQuota({ product, buyerId: row.buyerAccountId });
+      const remaining = await quota.remainingQuota({ product, buyerId: row.buyerAccountId });
       if (remaining < 1) return;
       const holding = await this.db
         .select({ listing: listings })
@@ -1029,10 +1072,128 @@ export class Hive {
         .innerJoin(listings, eq(listings.id, orders.listingId))
         .where(and(eq(orders.buyerAccountId, row.buyerAccountId), inArray(orders.status, RESERVING)));
       let reserved = 0;
-      for (const h of holding) if (this.payments.quotaKey(await this.productRef(h.listing)) === key) reserved++;
+      for (const h of holding) if (quota.quotaKey(await this.productRef(h.listing)) === key) reserved++;
       if (remaining - reserved < 1) return;
       await this.apply(id, { type: "payment_confirmed", paymentRef: row.purchaseRequestNo ?? id }, { paidAt: this.now() });
     });
+  }
+
+  // ---- 电脑网站支付 ------------------------------------------------------
+
+  // One trade per order, priced at the order. The subject shows in the payer's Alipay bill, so it
+  // names the category only; the buyer's brief never goes to Alipay.
+  private async requestTrade(row: OrderRow) {
+    if (this.payments.kind !== "trade" || row.priceFen === null) throw new Error(`order ${row.id} has no price`);
+    const title = (await this.listCategories()).find((c) => c.id === row.category)?.title ?? row.category;
+    const returnUrl = this.webUrl.startsWith("https://") ? `${this.webUrl}/orders/${row.id}` : undefined;
+    const purchase = await this.payments.createTrade({
+      outTradeNo: row.id,
+      amountFen: fen(row.priceFen),
+      subject: `hive · ${title}`,
+      expiresAt: new Date(this.now().getTime() + TIMEOUTS.payment),
+      returnUrl,
+    });
+    await this.apply(
+      row.id,
+      { type: "payment_requested", purchaseUrl: purchase.purchaseUrl },
+      { purchaseRequestNo: row.id, purchaseQrCode: purchase.purchaseQrCode },
+    );
+  }
+
+  // Asks Alipay how the order's trade stands; the notification route and the sweeper both land here,
+  // one check per order at a time so a notification and a poll can't both confirm it.
+  private async detectTrade(id: string) {
+    if (this.payments.kind !== "trade") return;
+    const trade = this.payments;
+    await this.claimLock(`trade\u0000${id}`, async () => {
+      const row = await this.loadOrder(id);
+      if (row.status !== "AWAITING_PAYMENT") return;
+      const { state, tradeNo } = await trade.queryTrade(row.purchaseRequestNo ?? id);
+      if (state !== "paid") return;
+      await this.apply(id, { type: "payment_confirmed", paymentRef: tradeNo ?? id }, { paidAt: this.now() });
+    });
+  }
+
+  // A signed payment notification from Alipay. Returns false for anything we can't trust.
+  async paymentNotification(params: Record<string, string>) {
+    if (this.payments.kind !== "trade") return false;
+    const orderId = this.payments.verifyNotification(params);
+    if (!orderId) return false;
+    const [row] = await this.db.select({ id: orders.id }).from(orders).where(eq(orders.id, orderId));
+    // Not one of ours (another app on the same account): acknowledge so Alipay stops resending.
+    if (row) await this.detectTrade(orderId);
+    return true;
+  }
+
+  // Before an unpaid order is cancelled: closes its trade, then checks it once more. Returns true
+  // when the buyer had paid after all (the order is then confirmed as paid instead).
+  private async closeUnpaidTrade(id: string): Promise<boolean> {
+    if (this.payments.kind !== "trade") return false;
+    const row = await this.loadOrder(id);
+    if (row.status !== "AWAITING_PAYMENT" || !row.purchaseRequestNo) return false;
+    await this.payments.closeTrade(row.purchaseRequestNo);
+    await this.detectTrade(id);
+    return (await this.loadOrder(id)).status !== "AWAITING_PAYMENT";
+  }
+
+  // A paid order that failed (seller gave up, ran out of time or lost their listener) is refunded in
+  // full. Buyer rejections are recorded (refund_eligible) but not refunded automatically: there is
+  // no dispute step yet, and a rejection alone isn't proof the work was bad (design §3).
+  private async refundFailed(row: OrderRow) {
+    if (this.payments.kind !== "trade" || !row.paidAt || row.priceFen === null) return;
+    const id = `rfd_${row.id}`;
+    await this.db
+      .insert(refunds)
+      .values({ id, orderId: row.id, status: "REQUESTED", amountFen: row.priceFen, reason: row.failReason, createdAt: this.now(), updatedAt: this.now() })
+      .onConflictDoNothing();
+    await this.sendRefund(id);
+  }
+
+  // Sends (or re-sends) one refund. The request number is fixed per order, so repeats are safe.
+  private async sendRefund(refundId: string) {
+    if (this.payments.kind !== "trade") return;
+    const trade = this.payments;
+    await this.claimLock(refundId, async () => {
+      const [refund] = await this.db.select().from(refunds).where(eq(refunds.id, refundId));
+      if (!refund || refund.status === "SUCCEEDED" || refund.status === "FAILED") return;
+      const order = await this.loadOrder(refund.orderId);
+      const result = await trade.refund({
+        outTradeNo: order.purchaseRequestNo ?? order.id,
+        requestNo: `${order.id}-refund`,
+        amountFen: fen(refund.amountFen),
+        reason: "hive 订单未完成，全额退款",
+      });
+      await this.db
+        .update(refunds)
+        .set({ status: result.status, updatedAt: this.now(), ...(result.status === "FAILED" ? { reason: `${refund.reason ?? ""} · ${result.error ?? "退款失败"}` } : {}) })
+        .where(eq(refunds.id, refundId));
+      if (result.status === "FAILED") console.error(`refund ${refundId} failed: ${result.error}`);
+      if (result.status === "SUCCEEDED") {
+        const title = (await this.listCategories()).find((c) => c.id === order.category)?.title ?? order.category;
+        await this.notify(order.buyerAccountId, "refunded", order.id, `${title}：已原路退款 ${(refund.amountFen / 100).toFixed(2)} 元`);
+      }
+    });
+  }
+
+  private async retryRefunds() {
+    if (this.payments.kind !== "trade") return;
+    const open = await this.db.select({ id: refunds.id }).from(refunds).where(inArray(refunds.status, ["REQUESTED", "PROCESSING"]));
+    for (const { id } of open) {
+      try {
+        await this.sendRefund(id);
+      } catch (err) {
+        console.error(`refund ${id} failed`, err);
+      }
+    }
+  }
+
+  // The refund on an order, for its page.
+  async refundFor(orderId: string) {
+    const [refund] = await this.db
+      .select({ status: refunds.status, amountFen: refunds.amountFen, updatedAt: refunds.updatedAt })
+      .from(refunds)
+      .where(eq(refunds.orderId, orderId));
+    return refund ?? null;
   }
 
   // In-process mutex per key (hive runs as one server process).
@@ -1164,3 +1325,17 @@ export function publicOrder(r: OrderRow, viewerId: string) {
 }
 
 export const reviewOf = (r: OrderRow) => r.review as OrderReview | null;
+
+// 电脑网站支付 needs no setup at Alipay: a listing takes payment once its seller has set a price.
+function tradeChargeState(listing: typeof listings.$inferSelect): ChargeState {
+  const priced = listing.priceFen !== null;
+  return {
+    status: priced ? "ENABLED" : "NOT_CONFIGURED",
+    priceFen: priced ? fen(listing.priceFen!) : null,
+    skuId: null,
+    configurationUrl: null,
+    configurationQrCode: null,
+    managementUrl: null,
+    note: priced ? null : "先给这个上架设一个价格；买家按这个价格在支付宝收银台付款",
+  };
+}
