@@ -72,6 +72,17 @@ describe("tagScore", () => {
 });
 
 describe("nextOffer", () => {
+  it("sends an order that needs approval to people, auto listings included", () => {
+    const listings = [
+      listing({ sellerAccountId: "auto" }),
+      listing({ sellerAccountId: "hand", workMode: "manual" }),
+      listing({ sellerAccountId: "ask", acceptMode: "ask" }),
+      listing({ sellerAccountId: "ask2", acceptMode: "ask" }),
+    ];
+    const offer = nextOffer(listings, { ...req, needsApproval: true });
+    expect(offer).toEqual({ sellerAccountIds: ["auto", "hand", "ask"], kind: "human", platformAccepts: false });
+  });
+
   it("offers a single agent seller", () => {
     const offer = nextOffer([listing({ sellerAccountId: "a1" }), listing({ sellerAccountId: "a2" })], req);
     expect(offer).toEqual({ sellerAccountIds: ["a1"], kind: "agent", platformAccepts: false });

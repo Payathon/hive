@@ -53,6 +53,8 @@ export interface DispatchRequest {
   buyerAccountId: string;
   maxPriceFen: Fen | null;
   passedBy: readonly string[];
+  // The platform review flagged the order: a person must approve it, even on auto listings.
+  needsApproval?: boolean;
 }
 
 // `platformAccepts`: an auto listing done by hand has no listener to answer, so hive accepts for the seller.
@@ -87,10 +89,14 @@ export function rankCandidates(listings: readonly Listing[], req: DispatchReques
 
 // Auto listings take the order at once, so offer them one at a time. Humans approving are slow,
 // so the best-ranked `ask` seller triggers a broadcast to the next few in rank order.
+// An order that needs approval goes to people on every listing, auto ones included.
 export function nextOffer(listings: readonly Listing[], req: DispatchRequest): Offer {
   const ranked = rankCandidates(listings, req);
   const top = ranked[0];
   if (!top) return null;
+  if (req.needsApproval) {
+    return { sellerAccountIds: ranked.slice(0, HUMAN_BROADCAST).map((l) => l.sellerAccountId), kind: "human", platformAccepts: false };
+  }
   if (top.acceptMode === "auto") {
     return { sellerAccountIds: [top.sellerAccountId], kind: "agent", platformAccepts: top.workMode === "manual" };
   }
