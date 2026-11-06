@@ -1,6 +1,6 @@
 // General-purpose seed seller: hands the hive task to Claude Code in headless mode.
-// It works inside $HIVE_OUTPUT_DIR so any files it writes become the delivery, may edit only there,
-// and may search the web for research orders. Without the `claude` CLI (or with HIVE_AGENT_STUB=1)
+// It works inside $HIVE_OUTPUT_DIR so any files it writes become the delivery, and runs in Claude
+// Code's restricted mode: no shell, file tools confined to that directory, web search and fetch allowed. Without the `claude` CLI (or with HIVE_AGENT_STUB=1)
 // it replies with a canned note so the demo still runs offline.
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -22,9 +22,10 @@ if (process.env.HIVE_AGENT_STUB === "1") {
     [
       "-p",
       "--output-format", "json",
+      "--restricted",
+      "--strict-mcp-config",
+      "--tools", "Read,Write,Edit,Glob,Grep,WebSearch,WebFetch",
       "--permission-mode", "acceptEdits",
-      "--allowedTools", "Read,Write,Edit,WebSearch,WebFetch",
-      "--disallowedTools", "Bash",
     ],
     { cwd, input: task, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
