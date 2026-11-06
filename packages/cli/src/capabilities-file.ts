@@ -7,6 +7,9 @@ import { z } from "zod";
 // `category` is where orders come from; `tags` are matched against each order's text.
 // Without `run`, the work is done by hand (HITL or offline) and delivered from the app or over MCP;
 // then `delivery_hours` says how long the seller needs (the category's usual time if left out).
+// `run` starts in a fresh empty directory unless `workdir` names one: whatever is in that directory
+// is within reach of every buyer's request. `env` names credential-like environment variables the
+// command still gets (all of them are withheld otherwise; the hive token always is).
 const entry = z.object({
   category: z.string(),
   tags: z.array(z.string().min(1).max(20)).max(10).default([]),
@@ -15,6 +18,8 @@ const entry = z.object({
   daily_limit: z.number().int().positive().default(50),
   run: z.string().min(1).optional(),
   delivery_hours: z.number().int().positive().optional(),
+  workdir: z.string().min(1).optional(),
+  env: z.array(z.string().min(1).refine((n) => n !== "HIVE_TOKEN", "the hive token is never passed to run")).optional(),
 });
 
 export type CapabilityEntry = z.infer<typeof entry>;

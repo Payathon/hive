@@ -1,9 +1,9 @@
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { ApiError, guessMime, HiveClient, yuan, type CategoryInfo, type Order } from "@hive/client/api";
 import type { CapabilityEntry } from "./capabilities-file.ts";
-import { buildTask, outputFiles, readReply, runCommand } from "./runner.ts";
+import { buildTask, childEnv, findSecret, outputFiles, readReply, runCommand } from "./runner.ts";
 
 // A paid order gets this many tries at producing a delivery in the right format before we give up.
 export const MAX_ATTEMPTS = 3;
@@ -81,6 +81,12 @@ export class Listener {
 
   async run() {
     await this.sync();
+    for (const entry of this.entries.values()) {
+      if (!entry.run) continue;
+      const kept = childEnv(process.env, entry.env).env;
+      const withheld = Object.keys(process.env).filter((n) => !(n in kept));
+      if (withheld.length) this.log(`${entry.category}: run gets no ${withheld.join(", ")}; list any it needs under env: in the capabilities file`);
+    }
     this.log(`listening for orders on ${this.client.server}`);
     while (!this.abort.signal.aborted) {
       try {
@@ -133,19 +139,33 @@ export class Listener {
       this.log(`working on ${order.id} (${order.category})`);
       let lastError: string | null = order.lastDeliveryError;
       for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-        // A fresh directory per attempt, so files from a rejected try don't ride along.
-        const outputDir = await mkdtemp(join(tmpdir(), "hive-out-"));
+        // A fresh, empty directory per attempt: the command starts there (unless the capability names
+        // a workdir) and leaves its files in out/, so nothing from this machine or a rejected try rides along.
+        const jobDir = await mkdtemp(join(tmpdir(), "hive-job-"));
+        const outputDir = join(jobDir, "out");
+        await mkdir(outputDir);
         try {
           const task = buildTask(order, category, lastError, outputDir);
-          const result = await runCommand(entry.run, task, { timeoutMs: category.workTimeoutMs, outputDir });
+          const { env, secrets } = childEnv(process.env, entry.env);
+          const cwd = entry.workdir ? resolve(entry.workdir.replace(/^~(?=$|\/)/, homedir())) : jobDir;
+          const result = await runCommand(entry.run, task, { timeoutMs: category.workTimeoutMs, cwd, outputDir, env });
           if (result.code !== 0) {
             lastError = `command exited with ${result.code}: ${result.stderr.slice(-500)}`;
             this.log(`${order.id}: ${lastError}`);
             continue;
           }
           const reply = readReply(result.stdout, order.deliverySpec);
+          const out = await outputFiles(outputDir);
+          // A buyer's request may have talked the agent into handing over credentials: hold such a
+          // delivery back for the owner instead of sending it.
+          const leak = findSecret({ ...reply, files: out }, secrets);
+          if (leak) {
+            this.manual.add(order.id);
+            this.log(`${order.id}: held back the delivery, it seems to contain ${leak}. Nothing was sent; check the order and deliver it yourself in the app or with hive_deliver`);
+            return;
+          }
           const files = [];
-          for (const f of await outputFiles(outputDir)) {
+          for (const f of out) {
             files.push((await this.client.uploadFile(order.id, f.name, guessMime(f.name), f.bytes)).id);
           }
           await this.client.deliver(order.id, { ...reply, files });
@@ -156,7 +176,7 @@ export class Listener {
           lastError = err.message;
           this.log(`${order.id}: delivery rejected (attempt ${attempt}): ${err.message}`);
         } finally {
-          await rm(outputDir, { recursive: true, force: true });
+          await rm(jobDir, { recursive: true, force: true });
         }
       }
       this.log(`giving up on ${order.id} after ${MAX_ATTEMPTS} attempts`);
