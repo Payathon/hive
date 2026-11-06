@@ -171,6 +171,8 @@ export class Listener {
           if (leak) {
             this.manual.add(order.id);
             this.log(`${order.id}: held back the delivery, it seems to contain ${leak}. Nothing was sent; check the order and deliver it yourself in the app or with hive_deliver`);
+            // The owner may not be watching this log: hive tells them by push and mail too.
+            await this.client.orderAction(order.id, "hold", { reason: leak }).catch((err) => this.log(`${order.id}: couldn't notify the owner: ${(err as Error).message}`));
             return;
           }
           const files = [];

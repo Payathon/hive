@@ -103,6 +103,7 @@ const NOTICE_TITLE: Record<string, string> = {
   failed: "订单失败",
   completed: "订单完成",
   cancelled: "订单已取消",
+  held: "有一单要你手动交付",
 };
 // People read these in push and mail, so reasons are spelled out (same words as the web order page).
 const FAIL_TEXT: Record<string, string> = { work_timeout: "卖家没有按时交付", seller_abandoned: "卖家放弃了这单", heartbeat_lost: "卖家的 agent 掉线了" };
@@ -527,6 +528,16 @@ export class Hive {
     await this.requireSeller(p, orderId);
     await this.apply(orderId, { type: "work_started" });
     return this.getOrder(p, orderId);
+  }
+
+  // `hive serve` held back a delivery (it looked like it leaked a credential): tell the seller's
+  // person, by push and mail too, since their agent won't deliver it and the clock is running.
+  async holdDelivery(p: Principal, orderId: string, reason: string) {
+    const row = await this.requireSeller(p, orderId);
+    if (!RESERVING.includes(row.status)) throw new HiveError(409, "invalid_transition", `order is ${row.status}`);
+    const title = (await this.listCategories()).find((c) => c.id === row.category)?.title ?? row.category;
+    await this.notify(p.accountId, "held", orderId, `${title}：hive serve 发现你的 agent 要交付的内容里像是有凭证（${reason}），没有发出。请检查后在订单页手动交付`);
+    return { ok: true };
   }
 
   async abandon(p: Principal, orderId: string) {

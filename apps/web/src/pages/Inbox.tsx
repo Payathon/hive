@@ -5,8 +5,8 @@ import { Empty, NavBar, Skeleton, usePoll } from "../ui.tsx";
 
 // Same headlines the server uses for push and mail.
 // Icon colour per kind: blue for news, orange when it waits on you, green done, red failed.
-const TONE: Record<string, string> = { offer: "go", payment_required: "wait", paid: "go", delivered: "wait", failed: "bad", completed: "ok", cancelled: "mute" };
-const GLYPH: Record<string, string> = { offer: "派", payment_required: "付", paid: "款", delivered: "验", failed: "败", completed: "成", cancelled: "取" };
+const TONE: Record<string, string> = { offer: "go", payment_required: "wait", paid: "go", delivered: "wait", failed: "bad", completed: "ok", cancelled: "mute", held: "wait" };
+const GLYPH: Record<string, string> = { offer: "派", payment_required: "付", paid: "款", delivered: "验", failed: "败", completed: "成", cancelled: "取", held: "交" };
 
 const KIND: Record<string, string> = {
   offer: "新派单",
@@ -16,6 +16,7 @@ const KIND: Record<string, string> = {
   failed: "订单失败",
   completed: "订单完成",
   cancelled: "已取消",
+  held: "要你手动交付",
 };
 
 // 消息: everything hive told this account, newest first. A tap marks it read and opens the order.

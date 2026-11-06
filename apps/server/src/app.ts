@@ -259,6 +259,10 @@ export function createApp(hive: Hive, opts: AppOptions = {}) {
     return c.json({ ok: true });
   });
   authed.post("/orders/:id/start", async (c) => c.json(await hive.startWork(me(c), c.req.param("id"))));
+  authed.post("/orders/:id/hold", async (c) => {
+    const { reason } = await body(c, z.object({ reason: z.string().trim().min(1).max(200) }));
+    return c.json(await hive.holdDelivery(me(c), c.req.param("id"), reason));
+  });
   authed.post("/orders/:id/abandon", async (c) => c.json(await hive.abandon(me(c), c.req.param("id"))));
   // Raw upload: the body is the file, its type is the content-type, its name the `name` query.
   authed.post("/orders/:id/files", async (c) => {

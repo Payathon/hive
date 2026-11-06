@@ -32,7 +32,7 @@ async function sellerWith(run: string | undefined, extra: Partial<CapabilityEntr
   await listener.sync();
   await listener.pollOnce(0); // goes online
   const buyer = new HiveClient(env.base, await env.signup("buyer"));
-  return { ...env, listener, buyer, logs };
+  return { ...env, listener, buyer, logs, sellerToken };
 }
 
 // Drives one order: offer -> auto-accept -> buyer pays -> listener works.
@@ -131,6 +131,9 @@ describe("hive serve", () => {
     expect(t.logs.filter((m) => m.includes("held back"))).toEqual([
       expect.stringContaining("a private key in key.txt"),
     ]);
+    // And told the owner, who may not be watching the log.
+    const sellerView = await new HiveClient(t.base, t.sellerToken).request<{ kind: string; body: string }[]>("GET", "/v1/notifications");
+    expect(sellerView.find((n) => n.kind === "held")?.body).toContain("a private key in key.txt");
     // Left to the owner: the next poll doesn't run it again.
     await t.listener.pollOnce(0);
     await t.listener.drain();

@@ -52,6 +52,29 @@ describe("mail", () => {
     expect(html).toContain(`<a href="http://web.test/orders/${id}">`);
   });
 
+  it("pushes and mails a fully automatic seller when hive serve holds back a delivery", async () => {
+    const push = new RecordingPush();
+    const t = await setup({ push });
+    const seller = await t.agentSeller("studio", DATA, 500);
+    await t.ok("PATCH", "/v1/me", seller.token, { email: "studio@hive.demo" });
+    await t.ok("POST", "/v1/push/subscribe", seller.token, sub(1));
+    const buyer = await t.account("xiaowang");
+    const created = await t.ok("POST", "/v1/orders", buyer.token, orders[DATA]);
+    expect((await t.call("POST", `/v1/orders/${created.id}/hold`, seller.agent, { reason: "a private key in key.txt" })).status).toBe(404);
+    const accepted = await t.ok("POST", `/v1/orders/${created.id}/accept-offer`, seller.agent);
+    expect((await t.call("POST", `/v1/orders/${created.id}/hold`, seller.agent, { reason: "x" })).status).toBe(409);
+    await t.pay(accepted);
+    await t.ok("POST", `/v1/orders/${created.id}/check-payment`, buyer.token);
+    expect((await t.call("POST", `/v1/orders/${created.id}/hold`, buyer.token, { reason: "x" })).status).toBe(404);
+    await t.ok("POST", `/v1/orders/${created.id}/hold`, seller.agent, { reason: "a private key in key.txt" });
+    await t.hive.settle();
+    const [n] = await t.ok("GET", "/v1/notifications", seller.token);
+    expect(n).toMatchObject({ kind: "held", orderId: created.id });
+    expect(n.body).toContain("a private key in key.txt");
+    expect(push.sent.map((p) => p.message.title)).toEqual(["有一单要你手动交付"]);
+    expect((await (t.hive.mailer as OutboxMailer).list()).map((m) => m.subject)).toEqual(["hive：有一单要你手动交付"]);
+  });
+
   it("only lets the owner set a valid email, and clears it with null", async () => {
     const t = await setup();
     const a = await t.account("a");
